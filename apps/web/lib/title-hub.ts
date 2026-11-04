@@ -549,6 +549,9 @@ export interface LibraryWallEntry {
   title: string;
   year: number;
   type: "movie" | "tv" | "anime";
+  /** The shelf this title belongs to (电影/电视剧/综艺/动漫). A 综艺 title is a
+   *  `tv` media type, so grouping by `type` alone would hide the 综艺 shelf. */
+  libraryCategory: LibraryCategory;
   posterPath: string | null;
   seasonCount: number;
   obtainedEpisodes: number;
@@ -566,6 +569,7 @@ export interface LibraryWallEntry {
 export interface LibraryTypeCounts {
   movie: number;
   tv: number;
+  variety: number;
   anime: number;
 }
 
@@ -640,6 +644,7 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       title: title.title,
       year: title.year,
       type: title.type,
+      libraryCategory: libraryCategoryOf(title),
       posterPath,
       seasonCount: bySeasonNum.size,
       obtainedEpisodes: obtained,
@@ -658,6 +663,8 @@ export interface InProgressTitle {
   title: string;
   year: number;
   type: "movie" | "tv" | "anime";
+  /** Shelf, so a 综艺 acquisition surfaces under 综艺 rather than 电视剧. */
+  libraryCategory: LibraryCategory;
   posterPath: string | null;
 }
 
@@ -693,17 +700,21 @@ export async function getInProgressTitles(storageId?: string): Promise<InProgres
       title: title.title,
       year: title.year,
       type: title.type,
+      libraryCategory: libraryCategoryOf(title),
       posterPath,
     });
   }
   return [...byTmdb.values()];
 }
 
-/** Get count of each media type in the library. */
+/** Get count of each shelf in the library. */
 export function getLibraryTypeCounts(entries: LibraryWallEntry[]): LibraryTypeCounts {
+  const count = (category: LibraryCategory) =>
+    entries.filter((entry) => entry.libraryCategory === category).length;
   return {
-    movie: entries.filter((entry) => entry.type === "movie").length,
-    tv: entries.filter((entry) => entry.type === "tv").length,
-    anime: entries.filter((entry) => entry.type === "anime").length,
+    movie: count("movies"),
+    tv: count("tv"),
+    variety: count("variety"),
+    anime: count("anime"),
   };
 }

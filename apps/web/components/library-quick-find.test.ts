@@ -44,26 +44,34 @@ import { filterLibraryEntries, LibraryQuickFind } from "./library-quick-find";
 
 type Props = Parameters<typeof LibraryQuickFind>[0];
 
-const entry = (over: Partial<LibraryWallEntry> & { tmdbId: number; title: string }): LibraryWallEntry => ({
-  year: 2025,
-  type: "movie",
-  posterPath: null,
-  seasonCount: 1,
-  obtainedEpisodes: 1,
-  totalAiredEpisodes: 1,
-  totalEpisodes: 1,
-  releaseDate: null,
-  state: "complete",
-  airing: false,
-  ...over,
-});
+const entry = (over: Partial<LibraryWallEntry> & { tmdbId: number; title: string }): LibraryWallEntry => {
+  const type = over.type ?? "movie";
+  return {
+    year: 2025,
+    type,
+    libraryCategory: type === "anime" ? "anime" : type === "tv" ? "tv" : "movies",
+    posterPath: null,
+    seasonCount: 1,
+    obtainedEpisodes: 1,
+    totalAiredEpisodes: 1,
+    totalEpisodes: 1,
+    releaseDate: null,
+    state: "complete",
+    airing: false,
+    ...over,
+  };
+};
 
-const ip = (over: Partial<InProgressTitle> & { tmdbId: number; title: string }): InProgressTitle => ({
-  year: 2025,
-  type: "tv",
-  posterPath: null,
-  ...over,
-});
+const ip = (over: Partial<InProgressTitle> & { tmdbId: number; title: string }): InProgressTitle => {
+  const type = over.type ?? "tv";
+  return {
+    year: 2025,
+    type,
+    libraryCategory: type === "anime" ? "anime" : type === "tv" ? "tv" : "movies",
+    posterPath: null,
+    ...over,
+  };
+};
 
 function find(node: ReactNode, match: (element: ReactElement) => boolean): ReactElement | null {
   if (Array.isArray(node)) {
@@ -181,6 +189,22 @@ describe("LibraryQuickFind — home 模式", () => {
     expect(markup).not.toContain("匹配 ");
     expect(markup).not.toContain("没找到");
     expect(markup).not.toContain('aria-label="清空查找"');
+  });
+
+  it("综艺单独成行（不再混进电视剧），获取中的综艺也计入综艺行", () => {
+    const p: Props = {
+      wallEntries: [
+        entry({ tmdbId: 103, title: "向往的生活", type: "tv", libraryCategory: "variety" }),
+        entry({ tmdbId: 102, title: "黄泉的使者", type: "tv" }),
+      ],
+      inProgressTitles: [ip({ tmdbId: 203, title: "奔跑吧", libraryCategory: "variety" })],
+      storageId: undefined,
+      mode: "home",
+    };
+    const markup = html(p);
+    expect(markup).toContain("综艺 2");
+    expect(markup).toContain("电视剧 1");
+    expect(markup).toContain("获取中 1");
   });
 
   it("输入即过滤：只留匹配项，整行空则隐藏该分类行，计数提示", () => {
@@ -386,5 +410,26 @@ describe("LibraryQuickFind — category 模式与 filter 叠加", () => {
     const markup = html(p);
     expect(markup).toContain("没找到『黄泉』");
     expect(markup).toContain("/w/d1?tab=library&amp;type=tv&amp;filter=tracking");
+  });
+
+  it("综艺分类页按 shelf 过滤（同为 tv 媒体类型也不混入电视剧），链接带 type=variety", () => {
+    const p: Props = {
+      wallEntries: [
+        entry({ tmdbId: 401, title: "向往的生活", type: "tv", libraryCategory: "variety", state: "tracking" }),
+        entry({ tmdbId: 402, title: "黄泉的使者", type: "tv", state: "tracking" }),
+      ],
+      inProgressTitles: [ip({ tmdbId: 204, title: "奔跑吧", libraryCategory: "variety" })],
+      storageId: "d1",
+      mode: "category",
+      mediaType: "variety",
+      filter: "all",
+    };
+    const markup = html(p);
+    expect(markup).toContain("综艺");
+    expect(markup).toContain("/w/d1?tab=library&amp;type=variety&amp;filter=all");
+    expect(markup).toContain("向往的生活");
+    expect(markup).toContain("奔跑吧");
+    expect(markup).not.toContain("黄泉的使者");
+    expect(markup).toContain("1 部正在追踪");
   });
 });

@@ -24,6 +24,32 @@ export function filterLibraryEntries<T extends { title: string }>(entries: T[], 
   return entries.filter((entry) => entry.title.toLowerCase().includes(needle));
 }
 
+type CategoryParam = "movie" | "tv" | "variety" | "anime";
+type Shelf = "movies" | "tv" | "variety" | "anime";
+
+/** The four library rows. 综艺 titles are TV media type, so grouping must use the
+ *  shelf (`libraryCategory`), never the media type alone. */
+const CATEGORY_ROWS: ReadonlyArray<{ label: string; param: CategoryParam; shelf: Shelf }> = [
+  { label: "电影", param: "movie", shelf: "movies" },
+  { label: "电视剧", param: "tv", shelf: "tv" },
+  { label: "综艺", param: "variety", shelf: "variety" },
+  { label: "动漫", param: "anime", shelf: "anime" },
+];
+
+const SHELF_BY_PARAM: Record<CategoryParam, Shelf> = {
+  movie: "movies",
+  tv: "tv",
+  variety: "variety",
+  anime: "anime",
+};
+
+const LABEL_BY_PARAM: Record<CategoryParam, string> = {
+  movie: "电影",
+  tv: "电视剧",
+  variety: "综艺",
+  anime: "动漫",
+};
+
 export function LibraryQuickFind({
   wallEntries,
   inProgressTitles,
@@ -37,7 +63,7 @@ export function LibraryQuickFind({
   storageId?: string | undefined;
   /** "home"=分类行总览；"category"=单分类页（与 filter 叠加） */
   mode: "home" | "category";
-  mediaType?: "movie" | "tv" | "anime" | undefined;
+  mediaType?: CategoryParam | undefined;
   filter?: "all" | "complete" | "tracking" | "partial" | undefined;
 }): JSX.Element {
   const router = useRouter();
@@ -51,11 +77,12 @@ export function LibraryQuickFind({
     inputRef.current?.focus();
   };
 
-  // category 模式：先按现有 filter（complete/tracking/partial）过滤，再按 query 过滤。
+  // category 模式：先按 shelf 与现有 filter（complete/tracking/partial）过滤，再按 query 过滤。
+  const shelf = mediaType ? SHELF_BY_PARAM[mediaType] : undefined;
   const scopedWall =
     mode === "category"
       ? wallEntries.filter((entry) => {
-          if (mediaType && entry.type !== mediaType) return false;
+          if (shelf && entry.libraryCategory !== shelf) return false;
           if (filter === "complete") return entry.state === "complete";
           if (filter === "tracking") return entry.state === "tracking";
           if (filter === "partial") return entry.state === "partial";
@@ -63,8 +90,8 @@ export function LibraryQuickFind({
         })
       : wallEntries;
   const scopedInProgress =
-    mode === "category" && mediaType
-      ? inProgressTitles.filter((title) => title.type === mediaType)
+    mode === "category" && shelf
+      ? inProgressTitles.filter((title) => title.libraryCategory === shelf)
       : inProgressTitles;
 
   const matchedWall = filterLibraryEntries(scopedWall, query);
@@ -91,10 +118,12 @@ export function LibraryQuickFind({
     }
   };
 
-  const typeLabel = mediaType === "movie" ? "电影" : mediaType === "tv" ? "电视剧" : "动漫";
-  const trackingCount = wallEntries
-    .filter((entry) => entry.type === mediaType)
-    .filter((entry) => entry.state === "tracking" || entry.state === "partial").length;
+  const typeLabel = mediaType ? LABEL_BY_PARAM[mediaType] : "";
+  const trackingCount = shelf
+    ? wallEntries
+        .filter((entry) => entry.libraryCategory === shelf)
+        .filter((entry) => entry.state === "tracking" || entry.state === "partial").length
+    : 0;
 
   return (
     <>
@@ -178,27 +207,18 @@ export function LibraryQuickFind({
       ) : mode === "home" ? (
         <>
           <InProgressRow titles={matchedInProgress} />
-          <CategoryRow
-            label="电影"
-            type="movie"
-            inProgressTitles={matchedInProgress.filter((title) => title.type === "movie")}
-            wallEntries={matchedWall.filter((entry) => entry.type === "movie")}
-            storageId={storageId}
-          />
-          <CategoryRow
-            label="电视剧"
-            type="tv"
-            inProgressTitles={matchedInProgress.filter((title) => title.type === "tv")}
-            wallEntries={matchedWall.filter((entry) => entry.type === "tv")}
-            storageId={storageId}
-          />
-          <CategoryRow
-            label="动漫"
-            type="anime"
-            inProgressTitles={matchedInProgress.filter((title) => title.type === "anime")}
-            wallEntries={matchedWall.filter((entry) => entry.type === "anime")}
-            storageId={storageId}
-          />
+          {CATEGORY_ROWS.map((row) => (
+            <CategoryRow
+              key={row.param}
+              label={row.label}
+              typeParam={row.param}
+              inProgressTitles={matchedInProgress.filter(
+                (title) => title.libraryCategory === row.shelf,
+              )}
+              wallEntries={matchedWall.filter((entry) => entry.libraryCategory === row.shelf)}
+              storageId={storageId}
+            />
+          ))}
         </>
       ) : (
         <>
@@ -216,13 +236,13 @@ export function LibraryQuickFind({
 
 function CategoryRow({
   label,
-  type,
+  typeParam,
   inProgressTitles,
   wallEntries,
   storageId,
 }: {
   label: string;
-  type: string;
+  typeParam: CategoryParam;
   inProgressTitles: InProgressTitle[];
   wallEntries: LibraryWallEntry[];
   storageId?: string | undefined;
@@ -233,7 +253,7 @@ function CategoryRow({
   }
   return (
     <div className="category-section">
-      <Link className="category-header" href={`${workspaceBasePath(storageId)}?tab=library&type=${type}&filter=all`}>
+      <Link className="category-header" href={`${workspaceBasePath(storageId)}?tab=library&type=${typeParam}&filter=all`}>
         <h2>
           {label} {count}
         </h2>

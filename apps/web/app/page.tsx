@@ -460,9 +460,12 @@ async function LibrarySurface({ mediaType, filter, storageId }: { mediaType: str
     );
   }
 
-  // The type param is always one of the three (every link generates it that way);
-  // anything else falls back to the rows overview.
-  const category = mediaType === "movie" || mediaType === "tv" || mediaType === "anime" ? mediaType : null;
+  // The type param is always one of the four shelves (every link generates it
+  // that way); anything else falls back to the rows overview.
+  const category =
+    mediaType === "movie" || mediaType === "tv" || mediaType === "variety" || mediaType === "anime"
+      ? mediaType
+      : null;
   return (
     <section className="library-surface">
       {inProgress.length > 0 ? <AcquiringPoller /> : null}
