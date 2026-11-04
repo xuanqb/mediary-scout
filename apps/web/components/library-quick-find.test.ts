@@ -207,6 +207,32 @@ describe("LibraryQuickFind — home 模式", () => {
     expect(markup).toContain("获取中 1");
   });
 
+  it("Emby 已有卡片：蓝色徽标 + 副标题，且不显示 0 集统计", () => {
+    const p: Props = {
+      wallEntries: [
+        entry({
+          tmdbId: 106,
+          title: "Emby 综艺",
+          type: "tv",
+          libraryCategory: "variety",
+          state: "in_emby",
+          posterUrl: "/api/emby/image?itemId=e1",
+          seasonCount: 0,
+          obtainedEpisodes: 0,
+          totalAiredEpisodes: 0,
+          totalEpisodes: 0,
+        }),
+      ],
+      inProgressTitles: [],
+      storageId: undefined,
+      mode: "home",
+    };
+    const markup = html(p);
+    expect(markup).toContain("Emby 已有");
+    expect(markup).toContain("/api/emby/image?itemId=e1");
+    expect(markup).not.toContain("0/0/0");
+  });
+
   it("输入即过滤：只留匹配项，整行空则隐藏该分类行，计数提示", () => {
     const p = props();
     typeQuery(p, "猛攻");

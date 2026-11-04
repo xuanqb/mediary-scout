@@ -261,7 +261,9 @@ function TvHub({
             {view.aggregate !== "untracked" ? (
               <UntrackButton tmdbId={view.tmdbId} storageId={storageId} mediaKind="tv" basePath={basePath} />
             ) : null}
-            <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
+            {view.aggregate !== "untracked" ? (
+              <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
+            ) : null}
           </div>
         </div>
       </header>
@@ -397,7 +399,9 @@ function MovieHub({
                 {view.state !== "untracked" ? (
                   <UntrackButton tmdbId={view.tmdbId} storageId={storageId} mediaKind="movie" basePath={basePath} />
                 ) : null}
-                <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
+                {view.state !== "untracked" ? (
+                  <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
+                ) : null}
               </div>
               {view.state === "missing" ? (
                 <p className="hub-missing-note">已上映但仍缺资源，日常巡检会继续尝试。</p>

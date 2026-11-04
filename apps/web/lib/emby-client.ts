@@ -18,19 +18,32 @@ export interface EmbyConfig {
 interface EmbyItem {
   Id: string;
   Name?: string;
+  Type?: string;
+  ProductionYear?: number;
+  ImageTags?: Record<string, string | undefined>;
   ProviderIds?: Record<string, string | undefined>;
   ParentIndexNumber?: number;
   IndexNumber?: number;
+}
+
+/** One title present in an Emby library, normalized for the poster wall. */
+export interface EmbyLibraryItem {
+  id: string;
+  tmdbId: number;
+  name: string;
+  year: number | null;
+  type: "movie" | "tv";
+  hasPrimaryImage: boolean;
 }
 
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
 }
 
-async function embyGet<T>(config: EmbyConfig, path: string): Promise<T | null> {
+async function embyGet<T>(config: EmbyConfig, path: string, timeoutMs = 8000): Promise<T | null> {
   const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}${path}`, {
     headers: { "X-Emby-Token": config.apiKey, Accept: "application/json" },
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new Error(`Emby ${path} returned ${response.status}`);
@@ -45,10 +58,11 @@ function tmdbOf(item: EmbyItem): number | null {
 }
 
 /** Libraries by id, so the configured name → library id lookup is one call. */
-async function findLibraryId(config: EmbyConfig, name: string): Promise<string | null> {
+async function findLibraryId(config: EmbyConfig, name: string, timeoutMs = 8000): Promise<string | null> {
   const data = await embyGet<{ Items?: Array<{ Id: string; Name: string }> }>(
     config,
     "/Library/MediaFolders",
+    timeoutMs,
   );
   const want = name.trim();
   const match = data?.Items?.find((item) => item.Name === want);
@@ -128,6 +142,78 @@ export async function movieInEmby(
       `[emby] movie lookup failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
     );
     return false;
+  }
+}
+
+/** Every movie/series in one Emby library, so Emby-only titles can appear in the
+ *  app's poster wall. Fail-open → [] (an Emby outage must not break the library). */
+export async function listEmbyLibraryItems(
+  config: EmbyConfig,
+  category: LibraryCategory,
+): Promise<EmbyLibraryItem[]> {
+  try {
+    // The poster wall is a page load: fail fast when Emby is unreachable.
+    const libraryId = await findLibraryId(config, config.libraryNames[category], 4000);
+    if (!libraryId) return [];
+    const data = await embyGet<{ Items?: EmbyItem[] }>(
+      config,
+      `/Items?ParentId=${encodeURIComponent(libraryId)}&Recursive=true&IncludeItemTypes=Movie%2CSeries&Fields=ProviderIds%2CProductionYear%2CImageTags&Limit=10000`,
+      4000,
+    );
+    const seen = new Set<string>();
+    const items: EmbyLibraryItem[] = [];
+    for (const item of data?.Items ?? []) {
+      const tmdbId = tmdbOf(item);
+      const type = item.Type === "Movie" ? "movie" : item.Type === "Series" ? "tv" : null;
+      if (tmdbId === null || type === null) continue;
+      const key = `${type}:${tmdbId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({
+        id: item.Id,
+        tmdbId,
+        name: item.Name?.trim() || `TMDB ${tmdbId}`,
+        year:
+          typeof item.ProductionYear === "number" && Number.isInteger(item.ProductionYear)
+            ? item.ProductionYear
+            : null,
+        type,
+        hasPrimaryImage: Boolean(item.ImageTags?.Primary),
+      });
+    }
+    return items;
+  } catch (error) {
+    console.warn(
+      `[emby] library listing failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
+  }
+}
+
+/** Proxy one Emby poster through the app, so the API key never reaches the
+ *  browser. Null on any failure (the card falls back to its title text). */
+export async function fetchEmbyImage(
+  config: EmbyConfig,
+  itemId: string,
+): Promise<{ body: ArrayBuffer; contentType: string } | null> {
+  try {
+    const response = await fetch(
+      `${normalizeBaseUrl(config.baseUrl)}/Items/${encodeURIComponent(itemId)}/Images/Primary?maxWidth=342&quality=90`,
+      {
+        headers: { "X-Emby-Token": config.apiKey },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (!response.ok) return null;
+    return {
+      body: await response.arrayBuffer(),
+      contentType: response.headers.get("content-type") ?? "image/jpeg",
+    };
+  } catch (error) {
+    console.warn(
+      `[emby] image fetch failed (ignored): ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
   }
 }
 

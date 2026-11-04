@@ -48,7 +48,7 @@ When multiple drives are connected, the agent unifies all drive pools, checks li
 ## Library & automation
 
 - **Four shelves**: movies / TV / variety / anime land in separate trees. Each drive can customise its root directory (nested paths such as `media/library` are supported), the four shelf names, and the mount prefix SmartStrm sees.
-- **Emby integration**: titles already in Emby are matched by TMDB id and never searched again; one Emby library scan is triggered after a run lands files. Library names are configurable.
+- **Emby integration**: titles already in Emby are matched by TMDB id and never searched again; one Emby library scan is triggered after a run lands files. Library names are configurable. Works that exist only in Emby also appear in the matching library shelf, marked "In Emby".
 - **SmartStrm automation webhook**: after files land on Quark, an `a_task` is sent per directory. Landings in the same directory are merged during a quiet window (15s default, 120s max wait); HMAC-SHA256 signatures, retries, a delivery log and a test button are built in. Paths include the drive's SmartStrm mount prefix. 115 is mounted directly by Emby and never triggers a STRM refresh.
 
 ## More docs

@@ -862,6 +862,8 @@ export async function saveEmbyConfigAction(input: {
       await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, "");
       await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, "");
       await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, "");
+      const { clearEmbyLibraryCache } = await import("../lib/emby-library");
+      clearEmbyLibraryCache(accountId);
       return { success: true, message: "已关闭 Emby 联动" };
     }
     if (!/^https?:\/\//i.test(baseUrl)) {
@@ -894,6 +896,8 @@ export async function saveEmbyConfigAction(input: {
     await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, JSON.stringify(names));
     await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, baseUrl);
     await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, apiKey);
+    const { clearEmbyLibraryCache } = await import("../lib/emby-library");
+    clearEmbyLibraryCache(accountId);
     return { success: true, message: probe.message };
   } catch (error) {
     return { success: false, message: `保存失败：${String(error)}` };
@@ -915,6 +919,8 @@ export async function clearEmbyConfigAction(): Promise<PushSettingsActionResult>
     await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, "");
     await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, "");
     await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, "");
+    const { clearEmbyLibraryCache } = await import("../lib/emby-library");
+    clearEmbyLibraryCache(accountId);
     return { success: true };
   } catch (error) {
     return { success: false, message: `清空失败：${String(error)}` };

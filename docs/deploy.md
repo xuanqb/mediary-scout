@@ -45,7 +45,7 @@ Mediary Scout 以 Docker Compose 部署（NAS / 软路由 / VPS / 闲置 PC）�
    - 通知推送(Bark / Server酱 / 企业微信 / webhook)
    - 自己的 TMDB key(不配默认走作者代理,开箱即用)
    - Prowlarr 磁力聚合(仅 115 支持磁力)
-   - Emby 联动(已有集跳过搜索)
+   - Emby 联动(已有集跳过搜索；Emby 独有的作品也会带「Emby 已有」进入媒体库分组)
    - SmartStrm 自动化 Webhook(夸克落盘后生成 .strm；115 由 Emby 直接挂载，无需触发)
    - 国内构建加速(registry mirror + npm 镜像)
 
