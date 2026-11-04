@@ -2,8 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_EMBY_LIBRARY_NAMES,
   episodesInEmby,
-  fetchEmbyImage,
-  listEmbyLibraryItems,
   movieInEmby,
   probeEmby,
   refreshEmbyLibrary,
@@ -123,77 +121,6 @@ describe("movieInEmby", () => {
     ]);
     expect(await movieInEmby(config, { tmdbId: 603 })).toBe(true);
     expect(await movieInEmby(config, { tmdbId: 604 })).toBe(false);
-  });
-});
-
-describe("listEmbyLibraryItems", () => {
-  it("maps movies + series with TMDB ids, dedupes, and keeps the image flag", async () => {
-    stubFetch([
-      ["/Library/MediaFolders", { Items: [{ Id: "lib-v", Name: "综艺" }] }],
-      [
-        "IncludeItemTypes=Movie%2CSeries",
-        {
-          Items: [
-            {
-              Id: "i1",
-              Name: "爸爸当家",
-              Type: "Series",
-              ProductionYear: 2022,
-              ProviderIds: { Tmdb: "201781" },
-              ImageTags: { Primary: "tag" },
-            },
-            { Id: "i2", Name: "无 TMDB", Type: "Series", ProviderIds: {} },
-            // Emby often lists the same work twice (two folders); keep one card.
-            { Id: "i3", Name: "爸爸当家", Type: "Series", ProductionYear: 2022, ProviderIds: { Tmdb: "201781" } },
-            { Id: "i4", Name: "动画电影", Type: "Movie", ProductionYear: 2020, ProviderIds: { Tmdb: "99" } },
-          ],
-        },
-      ],
-    ]);
-    expect(await listEmbyLibraryItems(config, "variety")).toEqual([
-      { id: "i1", tmdbId: 201781, name: "爸爸当家", year: 2022, type: "tv", hasPrimaryImage: true },
-      { id: "i4", tmdbId: 99, name: "动画电影", year: 2020, type: "movie", hasPrimaryImage: false },
-    ]);
-  });
-
-  it("returns [] when the library name does not exist", async () => {
-    stubFetch([["/Library/MediaFolders", { Items: [{ Id: "lib-x", Name: "别的库" }] }]]);
-    expect(await listEmbyLibraryItems(config, "variety")).toEqual([]);
-  });
-
-  it("fails open when Emby errors", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => {
-        throw new Error("down");
-      }),
-    );
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    expect(await listEmbyLibraryItems(config, "variety")).toEqual([]);
-    vi.restoreAllMocks();
-  });
-});
-
-describe("fetchEmbyImage", () => {
-  it("returns the image bytes and content type", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        async () =>
-          new Response(new Uint8Array([1, 2, 3]), {
-            status: 200,
-            headers: { "Content-Type": "image/png" },
-          }),
-      ),
-    );
-    const image = await fetchEmbyImage(config, "item-1");
-    expect(image?.contentType).toBe("image/png");
-    expect(new Uint8Array(image!.body)).toEqual(new Uint8Array([1, 2, 3]));
-  });
-
-  it("returns null on a non-2xx response", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("nope", { status: 404 })));
-    expect(await fetchEmbyImage(config, "item-1")).toBeNull();
   });
 });
 

@@ -8,7 +8,6 @@ import {
   type WorkflowKind,
   type WorkflowStatus,
 } from "@media-track/workflow";
-import type { LibraryWallEntry } from "./title-hub";
 
 // tmdb-cache (imported by title-hub) marks itself server-only; plain Node has no such package.
 // @ts-expect-error Vitest's runtime supports virtual mocks, but its v4 typings omit the option.
@@ -119,56 +118,3 @@ describe("getInProgressTitles", () => {
   });
 });
 
-describe("mergeEmbyOnlyEntries", () => {
-  const tracked: LibraryWallEntry = {
-    tmdbId: 1,
-    title: "已追踪",
-    year: 2024,
-    type: "tv",
-    libraryCategory: "variety",
-    posterPath: "/p1.jpg",
-    seasonCount: 1,
-    obtainedEpisodes: 1,
-    totalAiredEpisodes: 1,
-    totalEpisodes: 1,
-    releaseDate: null,
-    state: "complete",
-    airing: false,
-  };
-
-  it("appends Emby-only works in their Emby shelf, skipping ids the app tracks", async () => {
-    const hub = await import("./title-hub");
-    const merged = hub.mergeEmbyOnlyEntries([tracked], [
-      {
-        category: "variety",
-        items: [
-          // Same series the app already tracks → no duplicate card.
-          { id: "e1", tmdbId: 1, name: "已追踪", year: 2024, type: "tv", hasPrimaryImage: false },
-          { id: "e2", tmdbId: 2, name: "Emby 综艺", year: 2023, type: "tv", hasPrimaryImage: true },
-        ],
-      },
-      {
-        category: "movies",
-        items: [
-          // Same TMDB number but the movie namespace — a different work, keep it.
-          { id: "e3", tmdbId: 1, name: "Emby 电影", year: 2020, type: "movie", hasPrimaryImage: false },
-        ],
-      },
-    ]);
-
-    expect(merged).toHaveLength(3);
-    // The tracked series card is not duplicated by the same Emby series.
-    expect(merged.filter((entry) => entry.type === "tv" && entry.tmdbId === 1)).toHaveLength(1);
-    expect(merged.find((entry) => entry.tmdbId === 2)).toMatchObject({
-      title: "Emby 综艺",
-      libraryCategory: "variety",
-      state: "in_emby",
-      posterUrl: "/api/emby/image?itemId=e2",
-    });
-    expect(merged.find((entry) => entry.type === "movie")).toMatchObject({
-      title: "Emby 电影",
-      libraryCategory: "movies",
-      state: "in_emby",
-    });
-  });
-});

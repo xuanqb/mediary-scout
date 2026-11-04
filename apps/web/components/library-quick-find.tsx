@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type JSX, type KeyboardEvent } from "react";
-import { CalendarClock, CheckCircle2, Clapperboard, Clock3, LoaderCircle, Search, TriangleAlert, X } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, LoaderCircle, Search, TriangleAlert, X } from "lucide-react";
 // Client components must take the /scope subpath, not the barrel — the barrel
 // drags pg/postgres into the client bundle (see request-state.tsx).
 import { showHref } from "@media-track/workflow/scope";
@@ -318,19 +318,17 @@ function PosterCard({ entry, activeStorageId }: { entry: LibraryWallEntry; activ
   // season is still releasing shows BOTH ⚠️有缺集 and 追更中 (斗破苍穹), so the
   // blue/indigo "在更" signal isn't swallowed by the warning (parity with 达顿牧场).
   const badges =
-    entry.state === "in_emby"
-      ? [{ tone: "blue", icon: Clapperboard, label: "Emby 已有" }]
-      : entry.state === "reserved"
-        ? [{ tone: "blue", icon: CalendarClock, label: "预定（未上映）" }]
-        : entry.state === "complete"
-          ? [{ tone: "green", icon: CheckCircle2, label: "已全部入库" }]
-          : entry.state === "tracking"
-            ? [{ tone: "indigo", icon: Clock3, label: "追更中" }]
-            : [
-                { tone: "amber", icon: TriangleAlert, label: "有缺集" },
-                ...(entry.airing ? [{ tone: "indigo", icon: Clock3, label: "追更中" }] : []),
-              ];
-  const posterSrc = entry.posterUrl ?? (entry.posterPath ? tmdbImageUrl(entry.posterPath) : null);
+    entry.state === "reserved"
+      ? [{ tone: "blue", icon: CalendarClock, label: "预定（未上映）" }]
+      : entry.state === "complete"
+        ? [{ tone: "green", icon: CheckCircle2, label: "已全部入库" }]
+        : entry.state === "tracking"
+          ? [{ tone: "indigo", icon: Clock3, label: "追更中" }]
+          : [
+              { tone: "amber", icon: TriangleAlert, label: "有缺集" },
+              ...(entry.airing ? [{ tone: "indigo", icon: Clock3, label: "追更中" }] : []),
+            ];
+  const posterSrc = entry.posterPath ? tmdbImageUrl(entry.posterPath) : null;
 
   return (
     <Link className="wall-card" href={showHref(entry.tmdbId, "library", activeStorageId, entry.type)}>
@@ -358,13 +356,11 @@ function PosterCard({ entry, activeStorageId }: { entry: LibraryWallEntry; activ
           {/* A movie has no seasons/episodes; reserved ones name the release date.
               Series show 已获取/已播/共 (e.g. 6/6/9) so 6/6 of a 9-ep season no
               longer reads as "100% complete". */}
-          {entry.state === "in_emby"
-            ? `${entry.year} · Emby 已有`
-            : entry.type === "movie"
-              ? entry.state === "reserved"
-                ? `预定 · ${formatReleaseDate(entry.releaseDate)}上映`
-                : entry.year
-              : `${entry.year} · ${entry.seasonCount} 季 · ${entry.obtainedEpisodes}/${entry.totalAiredEpisodes}/${entry.totalEpisodes} 集`}
+          {entry.type === "movie"
+            ? entry.state === "reserved"
+              ? `预定 · ${formatReleaseDate(entry.releaseDate)}上映`
+              : entry.year
+            : `${entry.year} · ${entry.seasonCount} 季 · ${entry.obtainedEpisodes}/${entry.totalAiredEpisodes}/${entry.totalEpisodes} 集`}
         </span>
       </span>
     </Link>

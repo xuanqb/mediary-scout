@@ -15,8 +15,6 @@ import {
   type PreparedSeriesTarget,
 } from "@media-track/workflow";
 import { findDemoCandidateByTmdbId } from "./demo-candidates";
-import type { EmbyLibraryItem } from "./emby-client";
-import { listEmbyLibrariesForAccount } from "./emby-library";
 import {
   aggregateAiring,
   aggregateStateFromSeasons,
@@ -555,9 +553,6 @@ export interface LibraryWallEntry {
    *  `tv` media type, so grouping by `type` alone would hide the 综艺 shelf. */
   libraryCategory: LibraryCategory;
   posterPath: string | null;
-  /** Overrides the TMDB poster URL — used by Emby-only cards, whose poster is
-   *  proxied through the app so the Emby API key never reaches the browser. */
-  posterUrl?: string;
   seasonCount: number;
   obtainedEpisodes: number;
   totalAiredEpisodes: number;
@@ -576,51 +571,6 @@ export interface LibraryTypeCounts {
   tv: number;
   variety: number;
   anime: number;
-}
-
-/** TMDB ids are namespaced per media kind (movie 278 ≠ tv 278). */
-function mediaKey(type: "movie" | "tv" | "anime", tmdbId: number): string {
-  return `${type === "movie" ? "movie" : "series"}:${tmdbId}`;
-}
-
-/**
- * Append Emby-only titles — works Emby has but the app never tracked/acquired.
- * They inherit the shelf of the Emby library they live in and are read-only
- * cards (`in_emby`). A title the app already tracks always wins, so no
- * duplicate appears when both sides know it.
- */
-export function mergeEmbyOnlyEntries(
-  entries: LibraryWallEntry[],
-  emby: ReadonlyArray<{ category: LibraryCategory; items: EmbyLibraryItem[] }>,
-): LibraryWallEntry[] {
-  const taken = new Set(entries.map((entry) => mediaKey(entry.type, entry.tmdbId)));
-  const merged = [...entries];
-  for (const { category, items } of emby) {
-    for (const item of items) {
-      const key = mediaKey(item.type, item.tmdbId);
-      if (taken.has(key)) continue;
-      taken.add(key);
-      merged.push({
-        tmdbId: item.tmdbId,
-        title: item.name,
-        year: item.year ?? 0,
-        type: item.type,
-        libraryCategory: category,
-        posterPath: null,
-        ...(item.hasPrimaryImage
-          ? { posterUrl: `/api/emby/image?itemId=${encodeURIComponent(item.id)}` }
-          : {}),
-        seasonCount: 0,
-        obtainedEpisodes: 0,
-        totalAiredEpisodes: 0,
-        totalEpisodes: 0,
-        releaseDate: null,
-        state: "in_emby",
-        airing: false,
-      });
-    }
-  }
-  return merged;
 }
 
 /** Poster-wall view of every tracked title. */
@@ -705,10 +655,7 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       airing: libraryWallAiring({ anyActive, unreleased }),
     });
   }
-  const emby = await listEmbyLibrariesForAccount(scope.accountId);
-  return mergeEmbyOnlyEntries(entries, emby).sort((a, b) =>
-    a.title.localeCompare(b.title, "zh-Hans-CN"),
-  );
+  return entries.sort((a, b) => a.title.localeCompare(b.title, "zh-Hans-CN"));
 }
 
 export interface InProgressTitle {

@@ -44,7 +44,7 @@ export function seasonBadgeState(season: AggregateSeasonInput): SeasonBadgeState
   return season.status === "active" ? "airing" : "complete";
 }
 
-export type LibraryWallStateValue = "reserved" | "tracking" | "complete" | "partial" | "in_emby";
+export type LibraryWallStateValue = "reserved" | "tracking" | "complete" | "partial";
 
 /**
  * The poster-wall card state for a whole title. `reserved` (未上映电影) is a
