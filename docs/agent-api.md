@@ -12,7 +12,7 @@
 
 1. 生成一个随机 token：`openssl rand -hex 32`。这个 token 能改设置、发起获取，别用短的或好猜的。
 2. 写进部署目录的 `.env`：`MEDIA_TRACK_AGENT_TOKEN=<上一步的输出>`，然后在部署目录运行 `docker compose up -d`。
-3. 在跑编程 agent 的那台电脑上自己建连接文件（这台电脑要能访问实例，比如同一局域网或 Tailscale）：
+3. 在跑编程 agent 的那台电脑上自己建连接文件（这台电脑要能访问实例，比如同一局域网）：
 
 ```bash
 mkdir -p ~/.mediary && chmod 700 ~/.mediary

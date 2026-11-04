@@ -5,9 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * Interaction harness: tests run DOM-less (`environment: "node"`), so the
  * stateful LibraryQuickFind is driven the way lib/use-router.test.ts drives
  * hooks — React's hooks are faked with a module-level slot — and its handler
- * props are picked off the directly-returned element tree (the
- * remote-access-section.test.ts precedent). Markup assertions render the
- * fresh tree to static HTML, service-block.test.ts style.
+ * props are picked off the directly-returned element tree. Markup assertions
+ * render the fresh tree to static HTML, service-block.test.ts style.
  *
  * 假 useState 是单槽的——组件将来加第二个 useState 会让全部交互测试静默串槽，届时改按调用次序分配。
  * 假 useRef 固定返回假 input ref（current.focus 是 spy）——清空后焦点回搜索框就断言它。

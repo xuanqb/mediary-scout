@@ -20,9 +20,10 @@ vi.mock("../../../../lib/workflow-runtime", async () => {
 import { POST } from "./route";
 import * as runtime from "../../../../lib/workflow-runtime";
 
-// A request that came in through the Cloudflare tunnel (<slug>.mediaryconnect.app or
-// the owner's own tunnel) carries Cloudflare headers; a LAN request has none.
-const TUNNEL = { "cf-ray": "8f3-abc", "cf-connecting-ip": "203.0.113.7" };
+// A request that came in through a reverse proxy or another machine carries
+// forwarding headers; a LAN request has none.
+const REMOTE = { "cf-ray": "8f3-abc", "cf-connecting-ip": "203.0.113.7" };
+
 
 function post(headers: Record<string, string> = {}, body: unknown = { password: "correct horse" }): NextRequest {
   return new NextRequest("http://localhost:3000/api/auth/password", {
@@ -43,7 +44,7 @@ describe("POST /api/auth/password", () => {
     // Until the owner sets one, anyone who finds the public hostname could set it
     // and sign in with the owner's drives and model keys.
     vi.mocked(runtime.hasLoginPassword).mockResolvedValue(false);
-    const res = await POST(post(TUNNEL));
+    const res = await POST(post(REMOTE));
     expect(res.status).toBe(403);
     expect(runtime.setSingleUserPassword).not.toHaveBeenCalled();
   });
@@ -57,7 +58,7 @@ describe("POST /api/auth/password", () => {
 
   it("lets a signed-in owner change an existing password over the tunnel", async () => {
     vi.mocked(runtime.hasLoginPassword).mockResolvedValue(true);
-    const res = await POST(post(TUNNEL));
+    const res = await POST(post(REMOTE));
     expect(res.status).toBe(200);
     expect(runtime.requireAuthenticatedAccountId).toHaveBeenCalled();
     expect(runtime.setSingleUserPassword).toHaveBeenCalledWith("correct horse");
@@ -68,8 +69,8 @@ describe("POST /api/auth/password", () => {
     vi.mocked(runtime.requireAuthenticatedAccountId)
       .mockRejectedValueOnce(new runtime.UnauthenticatedAccountError())
       .mockRejectedValueOnce(new runtime.UnauthenticatedAccountError());
-    const change = await POST(post(TUNNEL));
-    const clear = await POST(post(TUNNEL, { clear: true }));
+    const change = await POST(post(REMOTE));
+    const clear = await POST(post(REMOTE, { clear: true }));
     expect([change.status, clear.status]).toEqual([401, 401]);
     expect(runtime.setSingleUserPassword).not.toHaveBeenCalled();
     expect(runtime.clearSingleUserPassword).not.toHaveBeenCalled();
@@ -78,7 +79,7 @@ describe("POST /api/auth/password", () => {
   it("still fails loudly on an unexpected error from the session check", async () => {
     vi.mocked(runtime.hasLoginPassword).mockResolvedValue(true);
     vi.mocked(runtime.requireAuthenticatedAccountId).mockRejectedValueOnce(new Error("db down"));
-    await expect(POST(post(TUNNEL))).rejects.toThrow("db down");
+    await expect(POST(post(REMOTE))).rejects.toThrow("db down");
     expect(runtime.setSingleUserPassword).not.toHaveBeenCalled();
   });
 });

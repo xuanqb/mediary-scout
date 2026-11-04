@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NAS / 软路由 iStoreOS / Linux Docker Compose 自动追剧部署指南 — 巡影 Mediary Scout</title>
-  <meta name="description" content="巡影 Mediary Scout 官方 Docker Compose 自部署完整教程：适用于群晖/威联通/飞牛 fnOS/极空间 NAS、iStoreOS 软路由与 Linux 服务器。含国内 Docker 镜像加速、一键更新与自动更新、多账号隔离及远程访问配置。">
+  <meta name="description" content="巡影 Mediary Scout 官方 Docker Compose 自部署完整教程：适用于群晖/威联通/飞牛 fnOS/极空间 NAS、iStoreOS 软路由与 Linux 服务器。含国内 Docker 镜像加速、一键更新与自动更新、多账号隔离。">
 
   <link rel="canonical" href="https://mediaryscout.app/guides/docker-nas-deploy/">
 
@@ -26,7 +26,7 @@
       {
         "@type": "Article",
         "headline": "NAS / 软路由 iStoreOS / Linux Docker Compose 自动追剧部署指南",
-        "description": "巡影 Mediary Scout 官方 Docker Compose 部署教程，涵盖镜像加速、一键升级、多账号与远程访问。",
+        "description": "巡影 Mediary Scout 官方 Docker Compose 部署教程，涵盖镜像加速、一键升级与多账号。",
         "datePublished": "2026-10-29",
         "dateModified": "2026-10-29",
         "author": {"@type": "Organization", "name": "Mediary Scout"},
@@ -132,15 +132,7 @@ NPM_REGISTRY=https://registry.npmmirror.com</code></pre>
       <li>你也可以开启<strong>「每日自动更新」</strong>（默认凌晨 04:00 检查）：更新助手会先等待正在进行的获取任务收尾、自动备份 PostgreSQL 数据库，然后拉取新版本构建切换；若新容器健康探针未通过，会自动回滚到旧版本。</li>
     </ul>
 
-    <h2>四、出门在外用手机访问（Tailscale / Cloudflare Tunnel / Mediary Connect）</h2>
-    <p>想在公司或地铁上用手机浏览器打开家里的巡影点片？有三种安全方式（均无需公网 IP）：</p>
-    <ol>
-      <li><strong>Mediary Connect（最省心，设置页内置）</strong>：在「设置 → 远程访问」里输入你想要的二级域名前缀（如 <code>myhome.mediary.uk</code>），扫码即可自动开通 Cloudflare 加密隧道与 DNS，直接用手机浏览器输入网址 + 你的实例访问密码登录。</li>
-      <li><strong>自建 Cloudflare Tunnel（免费）</strong>：在你自己的 Cloudflare 账号 Zero Trust 里创建一条 Tunnel 指向 <code>http://localhost:3000</code>。</li>
-      <li><strong>Tailscale / ZeroTier 异地组网（免费）</strong>：在 NAS 和手机上登录同一个 Tailscale 账号，直接通过虚拟内网 IP 访问。</li>
-    </ol>
-
-    <h2>五、开启全家多账号模式（可选）</h2>
+    <h2>四、开启全家多账号模式（可选）</h2>
     <p>如果家里人或朋友想共用这台服务器，但各自用各自的网盘、看各自的追剧海报墙，只需在 <code>.env</code> 中加一行：</p>
     <pre><code>MEDIA_TRACK_MULTI_USER=1</code></pre>
     <p>重启容器后，每个用户可以独立注册登录、绑定自己的网盘并拥有完全隔离的媒体库。</p>

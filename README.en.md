@@ -47,14 +47,14 @@ git clone https://github.com/fancydirty/mediary-scout && cd mediary-scout
 docker compose up -d
 ```
 
-Open `http://<host>:3000` and configure it in Settings. Later updates are one click in **Settings → 更新**, or daily on a schedule you set. Build mirrors for mainland China, remote access via Tailscale / Cloudflare Tunnel, multi-user, backups, and a prompt that lets an AI agent deploy it for you are all in the **[deploy guide](docs/deploy.md)** (Chinese).
+Open `http://<host>:3000` and configure it in Settings. Later updates are one click in **Settings → 更新**, or daily on a schedule you set. Build mirrors for mainland China, multi-user, backups, and a prompt that lets an AI agent deploy it for you are all in the **[deploy guide](docs/deploy.md)** (Chinese).
 
 | | Desktop app | Docker |
 |---|---|---|
 | Best for | Personal use on Mac / Windows | NAS or server, always on |
 | Scheduled gap-fill | While the app is open | 24/7 |
 | Multi-user | No | Yes |
-| Phone / remote access | This machine only | Tailscale / Cloudflare Tunnel |
+| Phone access | This machine only | Devices on the same LAN |
 
 Either way, bringing your own OpenAI-compatible AI model endpoint is an optional upgrade (the key stays in your own instance). Without a configured AI model, the app defaults to Kilo Code's free public model pool (no signup needed; the acquisition conversation context - search queries, task and message content, candidate results, file names - is sent to Kilo and its upstream model providers). Metadata works out of the box. Resource search uses PanSou: Docker bundles one, the desktop app defaults to a public instance you can swap for your own in Settings; Prowlarr can be added for magnets.
 

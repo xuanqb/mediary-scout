@@ -7,7 +7,7 @@ export interface LoginBootstrap {
 
 /** Copy-only helper used by the client login screen. Keep this module free of
  * repository and Node imports so the login bundle never pulls server storage in. */
-export function remoteFirstSetupNotice(bootstrap: LoginBootstrap | null): { title: string; note: string } | null {
+export function firstSetupOnLanNotice(bootstrap: LoginBootstrap | null): { title: string; note: string } | null {
   if (bootstrap?.remote !== true) return null;
   if (bootstrap.singleUser === true && bootstrap.passwordSet === false) {
     return {

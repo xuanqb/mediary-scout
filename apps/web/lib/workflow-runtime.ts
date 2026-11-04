@@ -314,7 +314,7 @@ export async function hasLoginPassword(): Promise<LoginPasswordState> {
   }
 }
 
-/** 单用户模式设置/更新登录密码（`acct_default`）。设置后远程访问即需登录。 */
+/** 单用户模式设置/更新登录密码（`acct_default`）。设置后外网请求即需登录。 */
 export async function setSingleUserPassword(
   newPassword: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -449,8 +449,8 @@ export const SESSION_COOKIE_NAME = "mt_session";
  *  Unset → AUTO from the client-facing request scheme: Secure over HTTPS, NOT over
  *  plain HTTP. This is the #60 fix — keying off NODE_ENV (which the Docker image
  *  hard-sets to "production") marked the cookie Secure even on a plain-HTTP LAN/FRP
- *  origin, so the browser never sent it back and login bounced. A reverse proxy /
- *  Cloudflare Tunnel terminates TLS and forwards `x-forwarded-proto`; trust its
+ *  origin, so the browser never sent it back and login bounced. A reverse proxy
+ *  terminates TLS and forwards `x-forwarded-proto`; trust its
  *  first (client-facing) hop, else fall back to the request's own protocol. */
 export function isCookieSecure(request: {
   headers: { get(name: string): string | null };

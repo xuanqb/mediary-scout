@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { HelpCircle, LoaderCircle } from "lucide-react";
-import { remoteFirstSetupNotice } from "../../lib/remote-access-copy";
+import { firstSetupOnLanNotice } from "../../lib/first-setup-copy";
 
 /**
  * §7 P1 login / register, with a context-aware CLAIM screen. Only reachable when
@@ -15,9 +15,9 @@ import { remoteFirstSetupNotice } from "../../lib/remote-access-copy";
  * 单用户 + 尚未设密码（`singleUser && passwordSet === false`）是**设置密码**屏。
  * 表单打 `POST /api/auth/password`：该端点在「还没有密码」时不要求认证、但**只接受
  * 局域网请求**（见 app/api/auth/password/route.ts），设置成功后再登录换取 session。
- * 经隧道来的外网访客（bootstrap.remote）不能做第一次设置——设密码和认领站主都一样，
+ * 经反向代理来的外网访客（bootstrap.remote）不能做第一次设置——设密码和认领站主都一样，
  * 谁先在外网打开地址谁就能把实例变成自己的——所以只给说明、不给表单
- * （remoteFirstSetupNotice）。
+ * （firstSetupOnLanNotice）。
  */
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -113,7 +113,7 @@ export default function LoginPage() {
   const note = singleUser
     ? bootstrap?.passwordSet
       ? "这台实例已设置访问密码。局域网内无需登录，从外网访问需要输入密码。"
-      : "给这台实例设一个访问密码。局域网内依旧免登录；以后从外网（远程访问）打开时，要输入这个密码才能进来。"
+      : "给这台实例设一个访问密码。局域网内依旧免登录；以后从外网打开时，要输入这个密码才能进来。"
     : claiming
     ? bootstrap?.hasExistingLibrary
       ? "这台实例已有媒体库。设置站主用户名 + 密码来接管它——你的库和网盘都会原样归你。"
@@ -141,7 +141,7 @@ export default function LoginPage() {
     );
   }
 
-  const lanOnly = remoteFirstSetupNotice(bootstrap);
+  const lanOnly = firstSetupOnLanNotice(bootstrap);
   if (lanOnly) {
     return (
       <main style={{ maxWidth: 360, margin: "14vh auto", padding: "0 20px" }}>

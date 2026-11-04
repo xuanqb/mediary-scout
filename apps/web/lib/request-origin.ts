@@ -3,7 +3,7 @@
  * the instance from OUTSIDE (e.g. the cold-agent upgrade prompt's health re-check).
  *
  * Trusts the first `x-forwarded-proto` / `x-forwarded-host` hop (same rule as
- * `isCookieSecure`: Cloudflare Tunnel / reverse proxies terminate TLS and forward
+ * `isCookieSecure`: reverse proxies terminate TLS and forward
  * the client-facing values; `request.nextUrl` would give the INTERNAL origin).
  * Anything unrecognized falls back to the plain-http Host header, then to the
  * compose default — a wrong origin in the prompt is annoying, an injected one

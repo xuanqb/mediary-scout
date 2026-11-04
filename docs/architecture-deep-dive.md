@@ -24,7 +24,6 @@
 | **ORM** | 无 — 原始 `pg` 连接 + SQL |
 | **测试** | Vitest (TS, `vitest.config.ts`) + Python unittest (`tests/`) |
 | **部署** | Docker Compose (web + PG + PanSou 三容器) |
-| **网络穿透** | 可选 Cloudflare Tunnel |
 | **代理** | CF Worker 提供内置 TMDB 代理 (开箱即用) |
 | **包管理** | npm workspaces (monorepo) |
 
@@ -1666,7 +1665,7 @@ flowchart TD
 2. `docker compose up -d`
 3. 打开 `http://<host>:3000`（仅限本机/局域网；**默认单用户模式无登录鉴权**——auth gate 仅在 `MEDIA_TRACK_MULTI_USER=1` 时生效，见 `apps/web/proxy.ts:4-18`，故**切勿把 :3000 裸暴露公网**）→ 设置页扫码绑定网盘 → 配置 LLM → 开始使用
 
-支持 Tailscale (内网穿透) 和 Cloudflare Tunnel (公网 HTTPS) 两种外网访问方式。
+仅支持本机 / 局域网访问；不要将 `:3000` 暴露到公网。
 
 ---
 

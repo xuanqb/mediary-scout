@@ -6,7 +6,7 @@ function headers(entries: Record<string, string>): { get(name: string): string |
 }
 
 describe("resolveRequestOrigin", () => {
-  it("trusts the first x-forwarded-proto/host hop (Cloudflare Tunnel → https public origin)", () => {
+  it("trusts the first x-forwarded-proto/host hop (reverse proxy → https public origin)", () => {
     const origin = resolveRequestOrigin(
       headers({
         "x-forwarded-proto": "https",

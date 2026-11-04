@@ -34,7 +34,6 @@ import { PatrolNowButton } from "../../components/patrol-now-button";
 import { SettingsTabs } from "../../components/settings-tabs";
 import { PasswordChangeForm } from "../../components/password-change-form";
 import { AccountAdminPanel } from "../../components/account-admin-panel";
-import { RemoteAccessSection } from "../../components/settings/remote-access-section";
 import { UpdateSection } from "../../components/settings/update-section";
 import { GitHubNameplate } from "../../components/github-nameplate";
 import { SettingsActionInbox } from "../../components/settings-action-inbox";
@@ -183,18 +182,6 @@ export default function SettingsPage({
                     <AccountManagementSection />
                   </Suspense>
                 </>
-              }
-              // Fallback is null, not a skeleton: a skeleton element would stream
-              // into the slot and the empty-slot observer would read the tab as
-              // visible before we know whether the viewer is the 站主.
-              remote={
-                // 桌面版没有远程访问功能(自托管才有):slot 置空 →
-                // SettingsTabs 观察不到内容 → 「远程访问」tab 不出现。
-                resolveIsDesktop() ? null : (
-                  <Suspense fallback={null}>
-                    <RemoteAccessSection searchParams={searchParams} />
-                  </Suspense>
-                )
               }
             />
             </Suspense>
