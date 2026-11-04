@@ -1,7 +1,7 @@
 import type { AgentMemoryStore } from "../agent-memory.js";
 import type { LanguageModel } from "ai";
 import type { AcquisitionDriveContext, ResourceProvider, StorageExecutor } from "../ports.js";
-import type { AuditEvent } from "../domain.js";
+import type { AuditEvent, LibraryCategory } from "../domain.js";
 import {
   bindRecoveryDirectories,
   ensureSeasonAcquisitionDirectories,
@@ -43,14 +43,20 @@ export interface RunAcquisitionV2WorkflowRequest {
   model: LanguageModel;
   workflowRunId: string;
   title: { name: string; year: number; aliases: string[]; tmdbId: number };
-  /** Library category parent (Movies/TV/Anime), chosen by title.type upstream. */
+  /** Library category parent (Movies/TV/Variety/Anime), chosen by title.type upstream. */
   categoryParentId: string;
+  /** The title's four-shelf category. Drives multi-drive directory routing when
+   *  `drives` is set; defaults from the search profile when absent. */
+  libraryCategory?: LibraryCategory;
   seasons: V2WorkflowSeason[];
   qualityPreference: string;
   /** 实有 = the DB obtained marks for this title (the agent's prior markObtained).
    *  Empty for a first acquisition; the type-3 patrol passes the DB's obtained
    *  episode codes so the need = aired − 实有 (NOT a 115 scan). */
   priorObtained?: string[];
+  /** Episodes already present in Emby — excluded from the search need, but not
+   *  persisted as obtained (a different state: AvailableInEmby). */
+  embyAvailableEpisodes?: string[];
   searchBudget?: number;
   maxSteps?: number;
   preferredLanguage?: string;
@@ -100,6 +106,8 @@ export interface RunAcquisitionV2WorkflowResult {
   stillMissing: string[];
   obtained: string[];
   providerAhead: string[];
+  /** Episodes reported by Emby (search-need only; never drive-verified). */
+  embyAvailable: string[];
   /** Real landed video files across the season dirs (best-effort, post-run); fuels
    *  the notification's true per-episode size. Absent when the read failed/empty. */
   landedFileCount?: number;
@@ -168,9 +176,13 @@ export async function runAcquisitionV2Workflow(
     latestAiredEpisode: season.latestAiredEpisode,
   }));
   const priorObtained = request.priorObtained ?? [];
+  const embyObtained = request.embyAvailableEpisodes ?? [];
+  // Emby episodes are "have" for the SEARCH need only; they are never written back
+  // as obtained (that state is drive-verified).
+  const have = [...new Set([...priorObtained, ...embyObtained])];
 
   // 7b — sync the need from the DB marks (应有 − 实有). No 115 scan, no parser.
-  const before = syncSeasonNeed({ seasons: seasonsForSync, obtained: priorObtained });
+  const before = syncSeasonNeed({ seasons: seasonsForSync, obtained: have });
   // A user request runs the agent even on a complete library: the episodes to
   // replace are obtained (the old file is there), so they are never "missing".
   // A leftover may be the only copy of an episode the DB already calls obtained.
@@ -182,8 +194,11 @@ export async function runAcquisitionV2Workflow(
       outcome: EMPTY_OUTCOME,
       agentText: "",
       stillMissing: [],
-      obtained: before.obtained,
-      providerAhead: before.providerAhead,
+      // Emby-only episodes are "have" for the need only; never persist them as
+      // obtained (that state is drive-verified).
+      obtained: before.obtained.filter((code) => priorObtained.includes(code)),
+      providerAhead: before.providerAhead.filter((code) => priorObtained.includes(code)),
+      embyAvailable: embyObtained,
       auditEvents: [],
     };
   }
@@ -215,6 +230,7 @@ export async function runAcquisitionV2Workflow(
     ...(request.searchHints === undefined ? {} : { searchHints: request.searchHints }),
     ...(request.qualityGuidance === undefined ? {} : { qualityGuidance: request.qualityGuidance }),
     ...(request.searchProfile === undefined ? {} : { searchProfile: request.searchProfile }),
+    ...(request.libraryCategory === undefined ? {} : { libraryCategory: request.libraryCategory }),
     ...(request.storageProvider === undefined ? {} : { storageProvider: request.storageProvider }),
     ...(request.assrtToken === undefined ? {} : { assrtToken: request.assrtToken }),
     ...(request.jevJudge === undefined ? {} : { jevJudge: request.jevJudge }),
@@ -243,8 +259,11 @@ export async function runAcquisitionV2Workflow(
   // reported not_found never becomes obtained on a bare mark.
   const after = syncSeasonNeed({
     seasons: seasonsForSync,
-    obtained: [...priorObtained, ...v2.coverage.obtained],
+    // Emby episodes count as have so an already-present episode is not reported
+    // as still-missing; they are filtered out of `obtained` below.
+    obtained: [...have, ...v2.coverage.obtained],
   });
+  const driveVerified = new Set([...priorObtained, ...v2.coverage.obtained]);
 
   // Best-effort real landed size for the notification (true per-episode bytes,
   // not a claimed quality). Reads AFTER the acquisition succeeded; on the heavy
@@ -295,8 +314,9 @@ export async function runAcquisitionV2Workflow(
     outcome: v2.outcome,
     agentText: v2.text,
     stillMissing: after.missing,
-    obtained: after.obtained,
-    providerAhead: after.providerAhead,
+    obtained: after.obtained.filter((code) => driveVerified.has(code)),
+    providerAhead: after.providerAhead.filter((code) => driveVerified.has(code)),
+    embyAvailable: embyObtained,
     auditEvents: v2.auditEvents,
     ...(v2.touchedTargetDrives ? { touchedTargetDrives: v2.touchedTargetDrives } : {}),
     ...(landed ? { landedFileCount: landed.fileCount, landedBytes: landed.totalBytes } : {}),

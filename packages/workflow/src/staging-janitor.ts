@@ -8,7 +8,6 @@ import {
 } from "./media-library-folder.js";
 import { drivePacer, realtimeDriveClock, type DriveClock } from "./drive-pacer.js";
 import { JANITOR_LIST_DEPTH } from "./staging-depth.js";
-import type { MayStartRun } from "./worker.js";
 
 /** Every kind. `blockIfTitleHasActiveRun` ignores staging_recovery so a user
  *  action can proceed; this reservation must still wait for one. */
@@ -30,14 +29,15 @@ export interface StagingJanitorDrive {
   accountId: string;
   storageId: string;
   status: "active" | "frozen";
-  /** Drive brand. pan123 listings are spaced; other brands are not (115 paces itself). */
+  /** Drive brand (unused for spacing now; kept for diagnostics). */
   provider: string;
   tvCid: string | null;
+  varietyCid: string | null;
   animeCid: string | null;
   executor: Partial<Pick<StorageExecutor, "listChildDirectories" | "listTree" | "listSubdirectories" | "removeDirectory">>;
 }
 
-/** Calls are spaced and 123's rate limit is waited out by drivePacer. When it gives
+/** A drive rate limit is waited out by drivePacer. When it gives
  *  up, the resume cursor stays where the walk stopped. */
 export type StagingJanitorClock = DriveClock;
 
@@ -72,7 +72,7 @@ function settledForSweep(
 }
 
 /** A subdirectory path with this many segments was recorded but not opened.
- *  115, 123, quark, 光鸭 and 天翼 all walk the same way: depth 1 is the orphan,
+ *  The supported drives all walk the same way: depth 1 is the orphan,
  *  each child adds one `path` segment, and `depth > maxDepth` returns before
  *  listing. A dir whose path has JANITOR_LIST_DEPTH segments may hold files
  *  the file walk never saw. */
@@ -152,7 +152,6 @@ async function sweepDrive(
   repository: SweepRepository,
   now: string,
   clock: StagingJanitorClock,
-  mayStartRun: MayStartRun | undefined,
 ): Promise<{
   removed: number;
   queued: number;
@@ -181,6 +180,8 @@ async function sweepDrive(
   const shows: Array<{ id: string; name: string; type: "tv" | "anime" }> = [];
   for (const category of [
     drive.tvCid ? { id: drive.tvCid, type: "tv" as const } : null,
+    // 综艺 is still a TV series in TMDB terms; only the shelf differs.
+    drive.varietyCid ? { id: drive.varietyCid, type: "tv" as const } : null,
     drive.animeCid ? { id: drive.animeCid, type: "anime" as const } : null,
   ]) {
     if (!category) continue;
@@ -194,18 +195,9 @@ async function sweepDrive(
   const start = cursorIndex < 0 ? 0 : cursorIndex;
   const startedFromSavedCursor = cursorIndex >= 0;
 
-  let held = false;
   for (let index = start; index < shows.length; index += 1) {
     const show = shows[index]!;
-    // An update is about to replace this process: stop before the next show's deletes,
-    // and resume from this show on the next sweep.
-    if (mayStartRun && !mayStartRun()) {
-      held = true;
-      await repository.setAccountSetting(drive.accountId, cursorKey(drive.storageId), show.id);
-      break;
-    }
-    try {
-      const children = await pace(() => executor.listChildDirectories(show.id));
+    try {      const children = await pace(() => executor.listChildDirectories(show.id));
       for (const child of children) {
         const runId = stagingRunId(child.name);
         if (!runId) continue;
@@ -315,8 +307,8 @@ async function sweepDrive(
     }
   }
 
-  if (!held) await repository.setAccountSetting(drive.accountId, cursorKey(drive.storageId), "");
-  return { removed, queued, notRemoved, skippedDeep, removedUntracked, skippedUnmatched, held };
+  await repository.setAccountSetting(drive.accountId, cursorKey(drive.storageId), "");
+  return { removed, queued, notRemoved, skippedDeep, removedUntracked, skippedUnmatched, held: false };
 }
 
 /**
@@ -331,7 +323,7 @@ async function sweepDrive(
  * sweep (~295 listings). A listing throw stores `staging_janitor_cursor:<storageId>`
  * (the show dir id) and the next sweep continues there. If that same show throws
  * again, the cursor moves to the next show so one directory cannot stall the drive.
- * pan123 calls are spaced 1500ms; other brands are not. Sequential on purpose.
+ * Sequential on purpose.
  */
 export async function sweepOrphanStagingDirs(input: {
   repository: SweepRepository;
@@ -339,17 +331,12 @@ export async function sweepOrphanStagingDirs(input: {
   now: string;
   clock?: StagingJanitorClock;
   log?: (line: string) => void;
-  /** Checked before each show folder. A false stops the sweep there. */
-  mayStartRun?: MayStartRun;
 }): Promise<{ held: boolean }> {
   const log = input.log ?? ((line: string) => console.log(line));
   const clock = input.clock ?? realtimeDriveClock;
-  let held = false;
   for (const drive of input.drives) {
-    if (held) break;
     try {
-      const counts = await sweepDrive(drive, input.repository, input.now, clock, input.mayStartRun);
-      held = counts.held;
+      const counts = await sweepDrive(drive, input.repository, input.now, clock);
       const removal =
         counts.notRemoved > 0
           ? `removed ${counts.removed} empty (${counts.notRemoved} could not be removed)`
@@ -365,6 +352,5 @@ export async function sweepOrphanStagingDirs(input: {
       log(`[patrol] staging janitor ${drive.storageId}: failed: ${message}`);
     }
   }
-  if (held) log("[patrol] staging janitor stopped: an update is about to replace this process");
-  return { held };
+  return { held: false };
 }

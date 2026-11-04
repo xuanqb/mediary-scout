@@ -3,7 +3,6 @@ import { DEFAULT_SETTINGS_TAB, type SettingsTabId } from "./settings-tabs-model"
 export type AttentionSeverity = "info" | "warning" | "blocker";
 export type AttentionKind =
   | "frozen_drive"
-  | "update_available"
   | "missing_llm"
   | "search_source_unreachable";
 export type SettingsAttentionTab = SettingsTabId;
@@ -43,9 +42,6 @@ export function settingsAttentionHref(
 
 export function buildSettingsAttentionItems(input: {
   demo: boolean;
-  /** update_available is instance-level (BUILD_COMMIT vs remote main) — owner-only.
-   *  Single-user passes true (implicit owner). frozen_drive/missing_llm stay per-account. */
-  isOwner: boolean;
   drives: Array<{
     id: string;
     provider: string;
@@ -59,9 +55,6 @@ export function buildSettingsAttentionItems(input: {
    *  recordPanSouHealth)。**刻意不在这里探活** —— 这个函数在徽章轮询路径上,
    *  每 8s 一次,真打网络等于每 8s 捶一遍用户的 PanSou。 */
   searchSource?: { custom: boolean; reachable: boolean };
-  /** The newer release the 「更新」 tab offers, or null. Owner-only, never in demo mode. On
-   *  desktop it is the newest release with both installers, which the tab offers to download. */
-  availableUpdate: { tag: string; commit: string; currentLabel: string } | null;
   /** Non-primary workspace id — preserved on deep-links so inbox actions don't reset context. */
   activeStorageId?: string;
   settingsHref?: (tab?: SettingsAttentionTab) => string;
@@ -115,20 +108,6 @@ export function buildSettingsAttentionItems(input: {
     });
   }
 
-  if (input.isOwner && input.availableUpdate) {
-    items.push({
-      // Release-scoped id (7 hex, matches the dismiss-id pattern): a newer release gets a
-      // new id, so it reappears after the user dismissed the older one.
-      id: `update:${input.availableUpdate.commit.slice(0, 7)}`,
-      kind: "update_available",
-      severity: "info",
-      title: "有新版本可用",
-      body: `当前 ${input.availableUpdate.currentLabel} · 新版本 ${input.availableUpdate.tag}。去「更新」看看改了什么。`,
-      actionLabel: "去更新",
-      href: href("update"),
-    });
-  }
-
   return items;
 }
 
@@ -153,19 +132,17 @@ export function summarizeSettingsAttention(items: SettingsAttentionItem[]): Sett
  *  - attention_state_since: {itemId: isoTime} first sight of the CURRENT
  *                           occurrence. Maintained at read time: an id missing
  *                           from the current items has its entry DROPPED, so a
- *                           re-freeze / re-unconfigure / new version starts a
- *                           fresh occurrence with a fresh createdAt — which is
- *                           what makes an old dismissal stop applying (its
- *                           timestamp is older than the new occurrence) and what
- *                           makes the badge return after being seen.
- * update_available's createdAt semantics: first time ANY read (badge poll or
- * settings render) observed `update:<latestShort>` for this account. */
+ *                           re-freeze / re-unconfigure starts a fresh
+ *                           occurrence with a fresh createdAt — which is what
+ *                           makes an old dismissal stop applying (its timestamp
+ *                           is older than the new occurrence) and what makes the
+ *                           badge return after being seen. */
 export const ATTENTION_SEEN_AT_KEY = "attention_seen_at";
 export const ATTENTION_DISMISSED_KEY = "attention_dismissed";
 export const ATTENTION_STATE_SINCE_KEY = "attention_state_since";
 
 const ATTENTION_ID_RE =
-  /^(missing_llm|search_source_unreachable|frozen:[A-Za-z0-9_-]{1,64}|update:[0-9a-f]{7,40})$/;
+  /^(missing_llm|search_source_unreachable|frozen:[A-Za-z0-9_-]{1,64})$/;
 
 /** Dismiss endpoint allow-list: only the id shapes the builder can emit. */
 export function isAttentionItemId(id: string): boolean {

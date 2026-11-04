@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>夸克/UC/115/123/光鸭/天翼六大网盘扫码连接教程与海搜/Prowlarr/字幕配置 — 巡影 Mediary Scout</title>
+  <title>夸克/UC/115/123/光鸭/天翼115 / 夸克连接教程与海搜/Prowlarr/字幕配置 — 巡影 Mediary Scout</title>
   <meta name="description" content="巡影 Mediary Scout 六大网盘（夸克、UC、115、123网盘、光鸭云盘、天翼云盘）手机 App 扫码登录与连接配置全指南，以及海搜 Haisou API、Prowlarr 磁力索引器、assrt 伪射手外挂字幕与 Jev 语义预筛的配置方法。">
 
   <link rel="canonical" href="https://mediaryscout.app/guides/cloud-drive-setup/">
 
-  <meta property="og:title" content="六大网盘扫码连接教程与海搜 / Prowlarr / 字幕配置 — 巡影 Mediary Scout">
+  <meta property="og:title" content="115 / 夸克连接教程与海搜 / Prowlarr / 字幕配置 — 巡影 Mediary Scout">
   <meta property="og:description" content="手把手教你扫码绑定夸克、UC、115、123、光鸭、天翼六大网盘，并配置海搜 API、Prowlarr 与 assrt 自动字幕。">
   <meta property="og:url" content="https://mediaryscout.app/guides/cloud-drive-setup/">
   <meta property="og:type" content="article">
@@ -25,7 +25,7 @@
     "@graph": [
       {
         "@type": "Article",
-        "headline": "夸克/UC/115/123/光鸭/天翼六大网盘扫码连接教程与海搜/Prowlarr/字幕配置",
+        "headline": "夸克/UC/115/123/光鸭/天翼115 / 夸克连接教程与海搜/Prowlarr/字幕配置",
         "description": "巡影 Mediary Scout 网盘绑定、搜索源扩展与外挂字幕配置完整教程。",
         "datePublished": "2026-10-29",
         "dateModified": "2026-10-29",
@@ -70,7 +70,7 @@
         <div class="nav-links">
           <a href="/features/multi-drive-agent/">多盘协作</a>
           <span aria-hidden="true">·</span>
-          <a href="/guides/which-cloud-drive/">六盘实测对比</a>
+          <a href="/guides/which-cloud-drive/">网盘实测对比</a>
           <span aria-hidden="true">·</span>
           <a href="/guides/docker-nas-deploy/">NAS 部署</a>
           <span aria-hidden="true">·</span>
@@ -91,6 +91,7 @@
   </nav>
 
   <main id="main" class="article">
+    <div class="callout" style="border-color:rgba(255,193,7,.45);background:rgba(255,193,7,.08);margin:16px 0"><p><strong>当前版本仅支持 115 与夸克网盘。</strong>本页包含历史对比数据，其他网盘品牌已不再支持；Docker 部署与最新功能见 <a href="/guides/docker-nas-deploy/">部署指南</a>。</p></div>
     <p class="crumb"><a href="/">巡影 Mediary Scout 首页</a> › <a href="/guides/">教程与指南</a> › 六大网盘与搜索源配置</p>
 
     <h1>夸克 / UC / 115 / 123 / 光鸭 / 天翼扫码连接与搜索源配置指南</h1>
@@ -132,7 +133,7 @@
     <h3>1. PanSou 网盘聚合搜索</h3>
     <ul>
       <li><strong>Docker 部署版</strong>：已内置专属 <code>pansou</code> 容器，开箱即用，无需手动配置。</li>
-      <li><strong>桌面版</strong>：默认连接公共实例；如果你在 NAS 上自建了 PanSou，可在「设置 → 资源与服务 → PanSou」填入你的自建地址。</li>
+      <li><strong>默认实例</strong>：Docker 部署自带 PanSou 容器；如果你另建了 PanSou，可在「设置 → 资源与服务 → PanSou」填入它的地址。</li>
     </ul>
 
     <h3>2. 海搜（Haisou）官方 API 补充源（可选）</h3>
@@ -151,7 +152,7 @@
     </ul>
 
     <div class="next">
-      <p>相关阅读：<a href="/guides/which-cloud-drive/">六大网盘实测资源量对比</a> · <a href="/features/multi-drive-agent/">多网盘统一协作机制详解</a> · <a href="/guides/docker-nas-deploy/">NAS / Docker 部署指南</a></p>
+      <p>相关阅读：<a href="/guides/which-cloud-drive/">网盘实测资源量对比</a> · <a href="/features/multi-drive-agent/">多网盘统一协作机制详解</a> · <a href="/guides/docker-nas-deploy/">NAS / Docker 部署指南</a></p>
     </div>
   </main>
 
@@ -161,7 +162,7 @@
         <h3>产品与核心功能</h3>
         <ul>
           <li><a href="/">巡影 Mediary Scout 首页</a></li>
-          <li><a href="https://github.com/fancydirty/mediary-scout/releases/latest">桌面版下载（macOS / Windows）</a></li>
+          <li><a href="/guides/docker-nas-deploy/">Docker / NAS 部署教程</a></li>
           <li><a href="/features/multi-drive-agent/">多网盘统一协作与容量保护</a></li>
           <li><a href="/features/smart-search-and-subtitles/">留言换源与自动补配中文字幕</a></li>
           <li><a href="/features/agent-api/">Agent HTTP API</a></li>
@@ -171,9 +172,9 @@
         <h3>指南、教程与对比</h3>
         <ul>
           <li><a href="/guides/">教程与指南中心</a></li>
-          <li><a href="/guides/which-cloud-drive/">六大网盘实测资源量对比</a></li>
+          <li><a href="/guides/which-cloud-drive/">网盘实测资源量对比</a></li>
           <li><a href="/guides/docker-nas-deploy/">NAS / 软路由 Docker 部署教程</a></li>
-          <li><a href="/guides/cloud-drive-setup/">六大网盘扫码连接与搜索源配置</a></li>
+          <li><a href="/guides/cloud-drive-setup/">115 / 夸克连接与搜索源配置</a></li>
           <li><a href="/compare/mediary-scout-vs-moviepilot-sonarr/">对比 MoviePilot / Sonarr / CloudDrive2</a></li>
         </ul>
       </div>

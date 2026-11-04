@@ -17,6 +17,7 @@ import {
   RequestSeasonButton,
 } from "../../../components/title-action-buttons";
 import { UntrackButton } from "../../../components/untrack-button";
+import { LibraryCategorySelect } from "../../../components/library-category-select";
 import { AgentMemoryNotes } from "../../../components/agent-memory-panel";
 import { UserMessageThread } from "../../../components/user-message-thread";
 import { isDemoMode } from "../../../lib/demo-mode";
@@ -260,6 +261,7 @@ function TvHub({
             {view.aggregate !== "untracked" ? (
               <UntrackButton tmdbId={view.tmdbId} storageId={storageId} mediaKind="tv" basePath={basePath} />
             ) : null}
+            <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
           </div>
         </div>
       </header>
@@ -292,6 +294,7 @@ function TvHub({
 
 const movieStateMeta = {
   acquired: { label: "已入库", tone: "green" },
+  in_emby: { label: "Emby 已有", tone: "blue" },
   reserved: { label: "预定 · 未上映", tone: "blue" },
   acquiring: { label: "获取中", tone: "indigo" },
   missing: { label: "未获取", tone: "amber" },
@@ -394,6 +397,7 @@ function MovieHub({
                 {view.state !== "untracked" ? (
                   <UntrackButton tmdbId={view.tmdbId} storageId={storageId} mediaKind="movie" basePath={basePath} />
                 ) : null}
+                <LibraryCategorySelect titleId={view.titleId} initial={view.libraryCategory} />
               </div>
               {view.state === "missing" ? (
                 <p className="hub-missing-note">已上映但仍缺资源，日常巡检会继续尝试。</p>
@@ -459,6 +463,7 @@ function HubSkeleton({ backLabel, backHref }: { backLabel: string; backHref: str
 /** What an episode cell says for its state. */
 const EPISODE_STATE_LABEL: Record<EpisodeDisplayState, string> = {
   obtained: "已获取",
+  in_emby: "Emby",
   missing_aired: "缺集",
   provider_ahead: "超前",
   unaired: "未播",

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FREE_LLM_PRESET } from "@media-track/workflow";
 
 vi.mock("./demo-mode", () => ({ isDemoMode: vi.fn(() => false) }));
-vi.mock("./update-view-server", () => ({ loadUpdateView: vi.fn(async () => ({ available: null, current: { label: "v2026.09.28", tag: "v2026.09.28" } })) }));
 vi.mock("./workflow-runtime", () => ({
   getAccountScopedSettings: vi.fn(() => ({ getSetting: async () => null })),
   getCurrentAccountId: vi.fn(async () => "acct_default"),
@@ -13,46 +12,31 @@ vi.mock("./workflow-runtime", () => ({
     source: "db",
   })),
   getWorkflowRepository: vi.fn(),
-  isMultiUserEnabled: vi.fn(() => false),
-  resolveIsDesktop: vi.fn(() => false),
   PANSOU_BASE_URL_SETTING_KEY: "pansou_base_url",
   PANSOU_HEALTH_SETTING_KEY: "pansou_last_probe",
   UNAUTHENTICATED_ACCOUNT_ID: "acct_unauthenticated",
 }));
 
 import { isDemoMode } from "./demo-mode";
-import { loadUpdateView } from "./update-view-server";
 import {
   dismissSettingsAttentionItem,
   loadSettingsAttentionSummary,
   markSettingsAttentionSeen,
-  resolveCurrentIsOwner,
 } from "./settings-attention-server";
 import {
   getAccountScopedSettings,
   getCurrentAccountId,
   getLlmConfig,
   getWorkflowRepository,
-  isMultiUserEnabled,
   resolveAgentModelConfig,
-  resolveIsDesktop,
 } from "./workflow-runtime";
-
-const VIEW_UPDATE = {
-  available: { tag: "v2026.10.02", commit: "2".repeat(40), date: "2026-10-02", notes: [] },
-  current: { label: "v2026.09.28", tag: "v2026.09.28" },
-};
-const VIEW_LATEST = { available: null, current: { label: "v2026.09.28", tag: "v2026.09.28" } };
 
 type Drive = { id: string; provider: string; label: string | null; status: "active" | "frozen" };
 
-function makeRepository(drives: Drive[], accounts: Record<string, { isOwner: boolean }> = {}) {
+function makeRepository(drives: Drive[]) {
   const accountSettings = new Map<string, string>();
   const repository = {
     listConnectedStorages: vi.fn(async () => drives),
-    getAccountById: vi.fn(async (id: string) =>
-      accounts[id] ? { id, username: id, isOwner: accounts[id]!.isOwner } : null,
-    ),
     getAccountSetting: vi.fn(async (accountId: string, key: string) =>
       accountSettings.get(`${accountId}${key}`) ?? null,
     ),
@@ -84,9 +68,6 @@ beforeEach(() => {
     modelId: "m",
     source: "db",
   });
-  (loadUpdateView as ReturnType<typeof vi.fn>).mockResolvedValue(VIEW_LATEST);
-  (resolveIsDesktop as ReturnType<typeof vi.fn>).mockReturnValue(false);
-  (isMultiUserEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
   // clearAllMocks 会连声明处的实现一起清掉,这里补回默认值:没配自建搜索源。
   (getAccountScopedSettings as ReturnType<typeof vi.fn>).mockReturnValue({
     getSetting: async () => null,
@@ -154,23 +135,6 @@ describe("loadSettingsAttentionSummary — per-account state", () => {
     expect(refrozen.count).toBe(1);
   });
 
-  it("update item is owner-only in multi-user, implicit owner in single-user", async () => {
-    (loadUpdateView as ReturnType<typeof vi.fn>).mockResolvedValue(VIEW_UPDATE);
-
-    const single = await loadSettingsAttentionSummary({});
-    expect(single.items.some((i) => i.kind === "update_available")).toBe(true);
-
-    (isMultiUserEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (getCurrentAccountId as ReturnType<typeof vi.fn>).mockResolvedValue("acct_bob");
-    makeRepository([], { acct_bob: { isOwner: false } });
-    const member = await loadSettingsAttentionSummary({});
-    expect(member.items.some((i) => i.kind === "update_available")).toBe(false);
-
-    makeRepository([], { acct_bob: { isOwner: true } });
-    const owner = await loadSettingsAttentionSummary({});
-    expect(owner.items.some((i) => i.kind === "update_available")).toBe(true);
-  });
-
   it("never writes for the unauthenticated sentinel (same invariant as markSettingsAttentionSeen)", async () => {
     const { accountSettings, repository } = makeRepository([]);
     await dismissSettingsAttentionItem(
@@ -193,31 +157,6 @@ describe("loadSettingsAttentionSummary — per-account state", () => {
     expect(JSON.parse(accountSettings.get("acct_defaultattention_dismissed")!)).toEqual({
       "frozen:cs1": "2026-07-27T01:00:00.000Z",
     });
-  });
-
-  it("non-owners never trigger the update view (badge polls every 8s; loadUpdateView can hit the updater)", async () => {
-    (loadUpdateView as ReturnType<typeof vi.fn>).mockResolvedValue(VIEW_UPDATE);
-    (isMultiUserEnabled as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    (getCurrentAccountId as ReturnType<typeof vi.fn>).mockResolvedValue("acct_bob");
-
-    makeRepository([], { acct_bob: { isOwner: false } });
-    await loadSettingsAttentionSummary({});
-    expect(loadUpdateView).not.toHaveBeenCalled();
-
-    // 站主仍照常读取发布视图。
-    makeRepository([], { acct_bob: { isOwner: true } });
-    await loadSettingsAttentionSummary({});
-    expect(loadUpdateView).toHaveBeenCalledWith({ updaterStatus: false });
-  });
-
-  it("still offers the update badge on desktop when a newer release exists (links to the update tab)", async () => {
-    (loadUpdateView as ReturnType<typeof vi.fn>).mockResolvedValue(VIEW_UPDATE);
-    (resolveIsDesktop as ReturnType<typeof vi.fn>).mockReturnValue(true);
-    makeRepository([]);
-    const summary = await loadSettingsAttentionSummary({});
-    expect(loadUpdateView).toHaveBeenCalledWith({ updaterStatus: false });
-    const item = summary.items.find((i) => i.kind === "update_available");
-    expect(item?.href).toContain("tab=update");
   });
 
   it("never writes attention state for the unauthenticated sentinel", async () => {
@@ -368,31 +307,6 @@ describe("missing_llm 判定口径 — 生效配置（resolveAgentModelConfig）
     const summary = await loadSettingsAttentionSummary({});
 
     expect(summary.items.map((i) => i.kind)).toContain("missing_llm");
-  });
-});
-
-describe("resolveCurrentIsOwner — single-user mode", () => {
-  // 单用户下经隧道来的匿名访客带一个随便什么 mt_session 也能过 proxy(只查有无),
-  // getCurrentAccountId() 会给这样的请求哨兵账号。哨兵绝不能被当成站主。
-  it("is not the owner for the unauthenticated sentinel", async () => {
-    makeRepository([]);
-    (getCurrentAccountId as ReturnType<typeof vi.fn>).mockResolvedValue("acct_unauthenticated");
-    expect(await resolveCurrentIsOwner()).toBe(false);
-  });
-
-  it("is the owner for acct_default (LAN, or a valid remote session)", async () => {
-    makeRepository([]);
-    (getCurrentAccountId as ReturnType<typeof vi.fn>).mockResolvedValue("acct_default");
-    expect(await resolveCurrentIsOwner()).toBe(true);
-  });
-
-  it("gives the sentinel no update item and never reads the update view in the attention summary", async () => {
-    (loadUpdateView as ReturnType<typeof vi.fn>).mockResolvedValue(VIEW_UPDATE);
-    (getCurrentAccountId as ReturnType<typeof vi.fn>).mockResolvedValue("acct_unauthenticated");
-    makeRepository([]);
-    const summary = await loadSettingsAttentionSummary({});
-    expect(loadUpdateView).not.toHaveBeenCalled();
-    expect(summary.items.some((i) => i.kind === "update_available")).toBe(false);
   });
 });
 

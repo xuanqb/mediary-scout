@@ -3,36 +3,24 @@
 import { useState, useTransition } from "react";
 import { Check, ExternalLink, LoaderCircle } from "lucide-react";
 import { useRouter } from "../lib/use-router";
-import { connectQuarkAction, connectUcAction } from "../app/actions";
+import { connectQuarkAction } from "../app/actions";
 import { runAction } from "../lib/run-action";
 
-/** Per-brand copy and wiring for the 阿里云盘族 cookie fallback. The two brands
- *  speak one protocol and expose identical cookie key names, so the ONLY things
- *  that differ are the site the user copies from and the action that binds it. */
-const BRANDS = {
-  quark: {
-    label: "夸克",
-    site: "pan.quark.cn",
-    apiHost: "drive-pc.quark.cn",
-    homeUrl: "https://pan.quark.cn/",
-    action: connectQuarkAction,
-  },
-  uc: {
-    label: "UC网盘",
-    site: "drive.uc.cn",
-    apiHost: "pc-api.uc.cn",
-    homeUrl: "https://drive.uc.cn/",
-    action: connectUcAction,
-  },
+/** Copy and wiring for the 夸克 cookie fallback. */
+const CONFIG = {
+  label: "夸克",
+  site: "pan.quark.cn",
+  apiHost: "drive-pc.quark.cn",
+  homeUrl: "https://pan.quark.cn/",
+  action: connectQuarkAction,
 } as const;
 
 /**
  * 手动 cookie 连接 —— 扫码登录的折叠回退。用户从网盘 web 请求头复制 Cookie
- * (需含 httpOnly 的 __pus,document.cookie 抓不全)粘贴进来。夸克与 UC 同族,
- * 共用这一个组件,由 brand 决定文案与调用的 action。
+ * (需含 httpOnly 的 __pus,document.cookie 抓不全)粘贴进来。
  */
-export function CloudFamilyCookieConnect({ brand }: { brand: keyof typeof BRANDS }) {
-  const config = BRANDS[brand];
+export function CloudFamilyCookieConnect() {
+  const config = CONFIG;
   const router = useRouter();
   const [cookie, setCookie] = useState("");
   const [isPending, startTransition] = useTransition();

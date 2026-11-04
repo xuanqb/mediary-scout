@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>NAS / 软路由 iStoreOS / Linux Docker Compose 自动追剧部署指南 — 巡影 Mediary Scout</title>
-  <meta name="description" content="巡影 Mediary Scout 官方 Docker Compose 自部署完整教程：适用于群晖/威联通/飞牛 fnOS/极空间 NAS、iStoreOS 软路由与 Linux 服务器。含国内 Docker 镜像加速、一键更新与自动更新、多账号隔离。">
+  <meta name="description" content="巡影 Mediary Scout 官方 Docker Compose 自部署完整教程：适用于群晖/威联通/飞牛 fnOS/极空间 NAS、iStoreOS 软路由与 Linux 服务器。含国内 Docker 镜像加速、升级与多账号隔离。">
 
   <link rel="canonical" href="https://mediaryscout.app/guides/docker-nas-deploy/">
 
   <meta property="og:title" content="NAS / 软路由 iStoreOS / Docker 自动追剧部署指南 — 巡影 Mediary Scout">
-  <meta property="og:description" content="一行 docker compose up -d 启动 Web + 内置 PanSou + Postgres + 自动更新助手，支持 24 小时定时追更与多账号隔离。">
+  <meta property="og:description" content="一行 docker compose up -d 启动 Web + 内置 PanSou + Postgres，支持 24 小时定时追更与多账号隔离。">
   <meta property="og:url" content="https://mediaryscout.app/guides/docker-nas-deploy/">
   <meta property="og:type" content="article">
   <meta property="og:image" content="https://mediaryscout.app/assets/og.png">
@@ -70,7 +70,7 @@
         <div class="nav-links">
           <a href="/features/multi-drive-agent/">多盘协作</a>
           <span aria-hidden="true">·</span>
-          <a href="/guides/which-cloud-drive/">六盘实测对比</a>
+          <a href="/guides/which-cloud-drive/">网盘实测对比</a>
           <span aria-hidden="true">·</span>
           <a href="/guides/docker-nas-deploy/">NAS 部署</a>
           <span aria-hidden="true">·</span>
@@ -96,15 +96,14 @@
     <h1>NAS / 软路由 iStoreOS / Linux Docker Compose 自动追剧部署指南</h1>
     <p class="meta">2026-10-29 更新 · 适用于群晖、飞牛 fnOS、绿联、极空间、威联通、Unraid、iStoreOS 软路由与 Linux VPS</p>
 
-    <p>如果你只是一台个人 Mac 或 Windows 电脑自用，直接下载 <a href="/">巡影 Mediary Scout 桌面版安装包</a> 双击打开即可，无需安装 Docker。但如果你希望<strong>7×24 小时在后台自动巡检补齐在更剧集、手机随时打开网页点片、或者全家人多账号合用</strong>，推荐将巡影部署在 NAS、软路由（如 iStoreOS）或家庭小主机上。</p>
+    <p>巡影以 Docker Compose 部署。如果你想<strong>7×24 小时在后台自动巡检补齐在更剧集、手机随时打开网页点片、或者全家人多账号合用</strong>，推荐部署在 NAS、软路由（如 iStoreOS）或家庭小主机上。</p>
 
-    <h2>一、两步启动完整 Docker 栈（含内置 PanSou 与自动更新器）</h2>
-    <p>巡影的 <code>docker-compose.yml</code> 已经把四个核心容器打包好了：</p>
+    <h2>一、两步启动完整 Docker 栈（含内置 PanSou）</h2>
+    <p>巡影的 <code>docker-compose.yml</code> 已经把核心容器打包好了：</p>
     <ul>
       <li><code>web</code>：Next.js 16 网页端 + 进程内后台获取/巡检 Worker；</li>
       <li><code>postgres</code>：PostgreSQL 17 持久化数据库（保存媒体库、剧集状态、网盘容量缓存与 Agent 记忆）；</li>
-      <li><code>pansou</code>：开箱即用的内置 PanSou 网盘资源聚合搜索容器（已内置精选高命中频道配置）；</li>
-      <li><code>updater</code>：网页端「一键更新 / 每日自动更新」守护助手（升级前自动执行 <code>pg_dump</code> 备份数据库，失败自动回滚）。</li>
+      <li><code>pansou</code>：开箱即用的内置 PanSou 网盘资源聚合搜索容器（已内置精选高命中频道配置）。</li>
     </ul>
 
     <pre><code>git clone https://github.com/fancydirty/mediary-scout.git
@@ -125,12 +124,10 @@ DOCKER_MIRROR=docker.1ms.run/
 NPM_REGISTRY=https://registry.npmmirror.com</code></pre>
     <p>配置后再执行 <code>docker compose up -d --build</code>，基础镜像与依赖包均走国内镜像高速拉取。</p>
 
-    <h2>三、网页端一键更新与每日自动更新</h2>
-    <p>部署完成后，后续版本迭代无需再 SSH 登录服务器敲命令：</p>
-    <ul>
-      <li>打开网页端 <strong>设置 → 更新</strong>，当 GitHub 发布新版本（如 <code>v2026.10.29</code>）时，页面会直接展示中文更新日志与「立即更新」按钮；</li>
-      <li>你也可以开启<strong>「每日自动更新」</strong>（默认凌晨 04:00 检查）：更新助手会先等待正在进行的获取任务收尾、自动备份 PostgreSQL 数据库，然后拉取新版本构建切换；若新容器健康探针未通过，会自动回滚到旧版本。</li>
-    </ul>
+    <h2>三、升级</h2>
+    <p>后续版本迭代在部署目录运行：</p>
+    <pre><code>./scripts/deploy.sh</code></pre>
+    <p>脚本会 <code>git pull</code>、重建 <code>web</code> 容器，并校验运行中的容器确实是刚拉取的提交。</p>
 
     <h2>四、开启全家多账号模式（可选）</h2>
     <p>如果家里人或朋友想共用这台服务器，但各自用各自的网盘、看各自的追剧海报墙，只需在 <code>.env</code> 中加一行：</p>
@@ -138,7 +135,7 @@ NPM_REGISTRY=https://registry.npmmirror.com</code></pre>
     <p>重启容器后，每个用户可以独立注册登录、绑定自己的网盘并拥有完全隔离的媒体库。</p>
 
     <div class="next">
-      <p>部署好了？下一步看 <a href="/guides/cloud-drive-setup/">六大网盘扫码连接与搜索源配置教程</a> · <a href="/guides/which-cloud-drive/">六大网盘实测资源量对比</a> · <a href="/features/agent-api/">配置 Agent API 让 Claude Code 操控巡影</a></p>
+      <p>部署好了？下一步看 <a href="/guides/cloud-drive-setup/">115 / 夸克连接与搜索源配置教程</a> · <a href="/guides/which-cloud-drive/">网盘实测资源量对比</a> · <a href="/features/agent-api/">配置 Agent API 让 Claude Code 操控巡影</a></p>
     </div>
   </main>
 
@@ -148,7 +145,7 @@ NPM_REGISTRY=https://registry.npmmirror.com</code></pre>
         <h3>产品与核心功能</h3>
         <ul>
           <li><a href="/">巡影 Mediary Scout 首页</a></li>
-          <li><a href="https://github.com/fancydirty/mediary-scout/releases/latest">桌面版下载（macOS / Windows）</a></li>
+          <li><a href="/guides/docker-nas-deploy/">Docker / NAS 部署教程</a></li>
           <li><a href="/features/multi-drive-agent/">多网盘统一协作与容量保护</a></li>
           <li><a href="/features/smart-search-and-subtitles/">留言换源与自动补配中文字幕</a></li>
           <li><a href="/features/agent-api/">Agent HTTP API</a></li>
@@ -158,9 +155,9 @@ NPM_REGISTRY=https://registry.npmmirror.com</code></pre>
         <h3>指南、教程与对比</h3>
         <ul>
           <li><a href="/guides/">教程与指南中心</a></li>
-          <li><a href="/guides/which-cloud-drive/">六大网盘实测资源量对比</a></li>
+          <li><a href="/guides/which-cloud-drive/">网盘实测资源量对比</a></li>
           <li><a href="/guides/docker-nas-deploy/">NAS / 软路由 Docker 部署教程</a></li>
-          <li><a href="/guides/cloud-drive-setup/">六大网盘扫码连接与搜索源配置</a></li>
+          <li><a href="/guides/cloud-drive-setup/">115 / 夸克连接与搜索源配置</a></li>
           <li><a href="/compare/mediary-scout-vs-moviepilot-sonarr/">对比 MoviePilot / Sonarr / CloudDrive2</a></li>
         </ul>
       </div>

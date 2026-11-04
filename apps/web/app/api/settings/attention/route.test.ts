@@ -14,8 +14,8 @@ import { GET } from "./route";
 import { loadSettingsAttentionSummary } from "../../../../lib/settings-attention-server";
 
 const fullItem = {
-  id: "update_available",
-  kind: "update_available",
+  id: "missing_llm",
+  kind: "missing_llm",
   href: "/settings?w=cs_other",
   prompt: "long prompt",
 };

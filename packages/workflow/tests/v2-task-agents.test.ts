@@ -96,86 +96,15 @@ describe("both prompts carry the systemic-block STOP rule (别甩锅: account bl
 });
 
 describe("transferModelLine — brand transfer model in the prompt", () => {
-  it("guangya: DUAL model — 光鸭分享链 转存 + 磁力/离线, distinct from other brands", () => {
-    const line = transferModelLine({ storageProvider: "guangya" });
-    expect(line).toBeTruthy();
-    expect(line).toMatch(/光鸭/);
-    expect(line).toMatch(/DUAL/);
-    expect(line).toContain("guangyapan.com/s/");
-    expect(line).toMatch(/磁力|magnet/i);
-    // the loud share failures the executor actually surfaces
-    expect(line).toContain("GUANGYA_SHARE_EMPTY");
-    expect(line).toContain("分享已失效");
-    // other brands' shares cannot land here
-    expect(line).toContain("GUANGYA_UNSUPPORTED_LINK");
-    expect(line).not.toContain("GUANGYA_ONLY_MAGNET");
-    expect(line).not.toBe(transferModelLine({ storageProvider: "quark" }));
-    expect(line).not.toBe(transferModelLine({ storageProvider: "pan123" }));
-    expect(line).not.toBe(transferModelLine({}));
-  });
-
   it("quark stays the 转存分享链 / 无磁力 model", () => {
     const line = transferModelLine({ storageProvider: "quark" });
     expect(line).toMatch(/夸克/);
     expect(line).toMatch(/QUARK_NO_MAGNET/);
   });
 
-  it("tianyi: 转存分享链 / 无磁力 model (SHARE_SAVE, 秒传 equivalent), distinct from quark/guangya/default", () => {
-    const line = transferModelLine({ storageProvider: "tianyi" });
-    expect(line).toBeTruthy();
-    expect(line.length).toBeGreaterThan(0);
-    expect(line).toMatch(/天翼/);
-    // a 转存分享链 drive (share-transfer, like 夸克 — NOT a magnet/offline drive)
-    expect(line).toMatch(/分享链|转存分享/);
-    expect(line).toContain("cloud.189.cn");
-    // no magnet/offline API — a magnet fails loud with the tianyi sentinel
-    expect(line).toContain("TIANYI_NO_MAGNET");
-    expect(line).not.toMatch(/QUARK_NO_MAGNET|GUANGYA_ONLY_MAGNET/);
-    // distinct from the quark line, the guangya line, and the default (115) empty line
-    expect(line).not.toBe(transferModelLine({ storageProvider: "quark" }));
-    expect(line).not.toBe(transferModelLine({ storageProvider: "guangya" }));
-    expect(line).not.toBe(transferModelLine({}));
-  });
-
-  it("pan123: dual 秒传分享 + native offline model, distinct from other brands", () => {
-    const line = transferModelLine({ storageProvider: "pan123" });
-    expect(line).toBeTruthy();
-    expect(line.length).toBeGreaterThan(0);
-    expect(line).toMatch(/123网盘/);
-    // Dual path: share-copy plus native magnet/offline.
-    expect(line).toMatch(/分享链|转存分享/);
-    expect(line).toContain("123pan.com");
-    expect(line).toMatch(/秒传/);
-    expect(line).toMatch(/DUAL|native offline/i);
-    expect(line).toMatch(/磁力|magnet/i);
-    expect(line).toContain("PAN123_OFFLINE_RESOLVE_FAILED");
-    expect(line).toContain("PAN123_OFFLINE_FAILED");
-    expect(line).not.toMatch(
-      /PAN123_NO_MAGNET|QUARK_NO_MAGNET|GUANGYA_ONLY_MAGNET|TIANYI_NO_MAGNET/,
-    );
-    // dead-share fail-loud signals the 123 executor actually surfaces
-    expect(line).toMatch(/分享不存在|已取消|提取码错误|链接失效/);
-    // distinct from the quark/tianyi/guangya lines and the default (115) empty line
-    expect(line).not.toBe(transferModelLine({ storageProvider: "quark" }));
-    expect(line).not.toBe(transferModelLine({ storageProvider: "tianyi" }));
-    expect(line).not.toBe(transferModelLine({ storageProvider: "guangya" }));
-    expect(line).not.toBe(transferModelLine({}));
-  });
-
   it("115 (default) injects no extra transfer-model line", () => {
     expect(transferModelLine({})).toBe("");
     expect(transferModelLine({ storageProvider: "pan115" })).toBe("");
-  });
-});
-
-describe("guangya system prompts carry the magnet transfer model", () => {
-  it.each([
-    ["tv", buildTvAnimeSystemPrompt({ storageProvider: "guangya" })],
-    ["movie", buildMovieSystemPrompt({ storageProvider: "guangya" })],
-  ])("%s prompt names the dual share + magnet model", (_name, prompt) => {
-    expect(prompt).toMatch(/磁力|magnet/i);
-    expect(prompt).toContain("guangyapan.com/s/");
-    expect(prompt).not.toContain("GUANGYA_ONLY_MAGNET");
   });
 });
 

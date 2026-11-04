@@ -1,6 +1,7 @@
 import type { AgentMemoryStore } from "../agent-memory.js";
 import type { LanguageModel } from "ai";
 import type { MediaTitle } from "../domain.js";
+import { libraryCategoryOf } from "../media-classification.js";
 import type { AcquisitionDriveContext, ResourceProvider, StorageExecutor } from "../ports.js";
 import {
   bridgeV2WorkflowToResult,
@@ -38,6 +39,8 @@ export interface RunTvAcquisitionV2Request {
   /** 实有 = the DB obtained marks (agent's prior markObtained); empty for a first
    *  acquisition, the type-3 patrol passes the DB obtained codes. */
   priorObtained?: string[];
+  /** Episodes already present in Emby — skipped by search but not marked obtained. */
+  embyAvailableEpisodes?: string[];
   searchBudget?: number;
   maxSteps?: number;
   preferredLanguage?: string;
@@ -93,6 +96,7 @@ export async function runTvAcquisitionV2(request: RunTvAcquisitionV2Request): Pr
       tmdbId: request.title.tmdbId,
     },
     categoryParentId: request.categoryParentId,
+    libraryCategory: libraryCategoryOf(request.title),
     seasons: request.seasons.map((season) => ({
       seasonNumber: season.seasonNumber,
       latestAiredEpisode: season.latestAiredEpisode,
@@ -102,6 +106,9 @@ export async function runTvAcquisitionV2(request: RunTvAcquisitionV2Request): Pr
     searchProfile: profile,
     ...(qualityGuidance === "" ? {} : { qualityGuidance }),
     ...(request.priorObtained === undefined ? {} : { priorObtained: request.priorObtained }),
+    ...(request.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: request.embyAvailableEpisodes }),
     ...(request.searchBudget === undefined ? {} : { searchBudget: request.searchBudget }),
     ...(request.maxSteps === undefined ? {} : { maxSteps: request.maxSteps }),
     ...(request.preferredLanguage === undefined ? {} : { preferredLanguage: request.preferredLanguage }),

@@ -1,6 +1,6 @@
-# 桌面端：自建 PanSou 实例（获得更丰富的资源来源）
+# 自建 PanSou 实例（获得更丰富的资源来源）
 
-**为什么需要？** 桌面版 Mediary Scout 是双击即用的独立应用，**不打包 PanSou 容器**（PanSou 是独立的第三方项目，保持解耦）。不配置时，桌面端默认指向作者托管的公共 PanSou 实例——它资源有限、偶尔不稳。
+**为什么需要？** Docker Compose 部署已自带一个 PanSou 容器，开箱即用。如果你想换成自己维护的实例、或想独立调整 PanSou 的频道配置，可以按本教程另起一份，并在「设置 → 资源提供商」里填入它的地址。配置前默认使用内置实例或公共实例——公共实例资源有限、偶尔不稳。
 
 关键在于 **PanSou 的频道配置**：开箱默认的 `pansou-web` 只索引磁力频道，**返回不到 115 网盘分享**。一个配好 115 源频道（`Lsp115`、`vip115hot`、`leoziyuan`、`Oscar_4Kmovies` 等）的实例，同一部电影能多返回一批 115 分享（含 4K REMUX）。自建一个配好频道的本地实例，agent 就能挑到真正的好资源。
 
@@ -58,4 +58,4 @@ http://localhost:8899
 - **想换更多频道**：编辑 `pansou.channels.env` 的 `CHANNELS` / `ENABLED_PLUGINS`，`docker rm -f mediary-pansou` 后用新配置重跑第 3 步。
 - **PanSou 是什么**：一个聚合 Telegram 频道网盘分享的搜索后端，见 [项目主页](https://github.com/fish2018/pansou)。Mediary Scout 与它无隶属关系，只是把它当可选的资源搜索源。
 
-> docker compose 自部署版**已自带**一个配好这份频道的 PanSou 容器，无需本教程——本教程仅面向**桌面版**用户。
+> docker compose 自部署版**已自带**一个配好这份频道的 PanSou 容器，无需本教程——本教程面向想独立自建 PanSou 的用户。

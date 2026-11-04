@@ -308,10 +308,6 @@ describe("transferUntilLanded gate over the REAL url classifier — every fail-l
   it.each([
     ["115", "https://115.com/s/sww96353nl6?password=g876", "115"],
     ["夸克", "https://pan.quark.cn/s/1a2b3c4d?passcode=ab12", "quark"],
-    ["天翼", "https://cloud.189.cn/t/QzUnmqBvYr2q?accessCode=x8fd", "tianyi"],
-    ["天翼 web/share", "https://cloud.189.cn/web/share?code=AbCd12&pwd=1234", "tianyi"],
-    ["123", "https://www.123pan.com/s/abc-1?pwd=x8fd", "123"],
-    ["123 镜像域", "https://123684.com/s/Kd9-TvBq?password=1234", "123"],
   ] as const)("a %s share candidate passes the gate and enters the iterate loop", async (_brand, url, type) => {
     const { sandbox, executor } = await realAdapterMovieSetup(url, type);
 
@@ -342,16 +338,16 @@ describe("transferUntilLanded gate over the REAL url classifier — every fail-l
   });
 });
 
-describe("transferUntilLanded — no_target_change STOPS the loop (123 异步 copy 的假 miss 防双落)", () => {
+describe("transferUntilLanded — no_target_change STOPS the loop (异步 copy 的假 miss 防双落)", () => {
   it("stops at a no_target_change attempt with nothing landed — does NOT burn the next candidate", async () => {
-    // A's 转存 went through but nothing appeared within the settle window: on 123's
-    // fire-copy async transfer this may be a FALSE miss (the server-side copy is
+    // A's 转存 went through but nothing appeared within the settle window: on a
+    // server-side async copy this may be a FALSE miss (the server-side copy is
     // still in flight). Burning B now could double-land the film once A's copy
     // arrives — the loop must stop and hand judgment back (runbook: re-read first).
     const ntcMessage = "转存完成但目标目录未出现新视频(20s settle 窗口)";
     const { sandbox, executor } = await realAdapterMultiSetup([
-      { id: "A", url: "https://www.123pan.com/s/aaa-1?pwd=x1", type: "123", outcome: { status: "no_target_change", message: ntcMessage } },
-      { id: "B", url: "https://www.123pan.com/s/bbb-2?pwd=y2", type: "123" },
+      { id: "A", url: "https://pan.quark.cn/s/aaa-1?pwd=x1", type: "quark", outcome: { status: "no_target_change", message: ntcMessage } },
+      { id: "B", url: "https://pan.quark.cn/s/bbb-2?pwd=y2", type: "quark" },
     ]);
 
     const result = await sandbox.transferUntilLanded({ candidateIds: ["A", "B"] });
@@ -364,8 +360,8 @@ describe("transferUntilLanded — no_target_change STOPS the loop (123 异步 co
 
   it("an ordinary loud dead link (failed, non-ntc) still iterates to the next candidate", async () => {
     const { sandbox, executor } = await realAdapterMultiSetup([
-      { id: "A", url: "https://www.123pan.com/s/aaa-1?pwd=x1", type: "123", outcome: { status: "failed", message: "分享已取消" } },
-      { id: "B", url: "https://www.123pan.com/s/bbb-2?pwd=y2", type: "123" },
+      { id: "A", url: "https://pan.quark.cn/s/aaa-1?pwd=x1", type: "quark", outcome: { status: "failed", message: "分享已取消" } },
+      { id: "B", url: "https://pan.quark.cn/s/bbb-2?pwd=y2", type: "quark" },
     ]);
 
     const result = await sandbox.transferUntilLanded({ candidateIds: ["A", "B"] });

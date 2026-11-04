@@ -1,5 +1,4 @@
 import type { QueueClaimOptions } from "@media-track/workflow";
-import { isUpdateHoldActive, whileInFlight } from "./update-hold";
 
 /**
  * In-process queue drainer.
@@ -28,9 +27,6 @@ export interface DrainDeps {
    *  drive client that throws "PAN115_COOKIE is required" every poll. Optional so
    *  existing callers/tests behave unchanged (absent ⇒ assume configured). */
   isDriveConfigured?: (() => Promise<boolean>) | undefined;
-  /** The daily auto-update check — self-gated, reads a few settings and returns. Runs
-   *  after the sweep, and also when no drive is connected: it touches no drive. */
-  autoUpdate?: (() => Promise<void>) | undefined;
   /** How many queued runs may go at once (the 同时处理 setting, shared with the patrol).
    *  Absent ⇒ 1: one after another. */
   concurrency?: (() => Promise<number>) | undefined;
@@ -40,31 +36,18 @@ export interface DrainDeps {
   sleep?: ((ms: number) => Promise<void>) | undefined;
 }
 
-async function checkAutoUpdate(deps: DrainDeps): Promise<void> {
-  if (!deps.autoUpdate) return;
-  try {
-    await deps.autoUpdate();
-  } catch (error) {
-    console.error(
-      `[background-worker] auto-update check failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-}
-
 /**
  * One drain tick: claim+run queued workflows (several at once on different drives,
  * see drainQueue) until nothing is going and nothing more can start (or the safety
- * cap is hit), then attempt the self-gated daily sweep and the auto-update check.
+ * cap is hit), then attempt the self-gated daily sweep.
  * Returns how many queued runs were started. The sweep is always attempted,
- * even if draining threw, so a transient queue failure never starves 巡检; a failing
- * sweep never starves the auto-update check either.
+ * even if draining threw, so a transient queue failure never starves 巡检.
  */
 export async function drainQueueOnce(deps: DrainDeps): Promise<number> {
   // Fresh instance, no 网盘 connected yet → nothing the worker can do. Skip QUIETLY
   // (don't call runNext/runScheduled, which would build a drive client and throw
   // every poll). Resumes automatically once the user connects a drive.
   if (deps.isDriveConfigured && !(await deps.isDriveConfigured())) {
-    await checkAutoUpdate(deps);
     return 0;
   }
   const drained = await drainQueue(deps);
@@ -75,7 +58,6 @@ export async function drainQueueOnce(deps: DrainDeps): Promise<number> {
       `[background-worker] daily sweep failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  await checkAutoUpdate(deps);
   return drained;
 }
 
@@ -188,10 +170,11 @@ export interface WorkerRuntime {
   /** Whether any drive is connected (gates the tick — see DrainDeps). Optional so
    *  test runtimes can omit it (absent ⇒ assume configured). */
   isDriveConfigured?: () => Promise<boolean>;
-  /** Daily auto-update check (see DrainDeps). Optional so test runtimes can omit it. */
-  autoUpdate?: () => Promise<void>;
   /** How many queued runs may go at once (see DrainDeps). Optional so test runtimes can omit it. */
   concurrency?: () => Promise<number>;
+  /** Send due automation webhooks (SmartStrm); returns how many were delivered.
+   *  Optional so test runtimes can omit it. */
+  flushAutomation?: () => Promise<number>;
 }
 
 /**
@@ -204,18 +187,18 @@ export async function defaultRuntime(): Promise<WorkerRuntime> {
   const {
     runNextQueuedWorkflow,
     runScheduledType3,
-    runAutoUpdateIfDue,
     recoverOrphanedRuns,
     workerHasConfiguredDrive,
     getWorkerConcurrency,
   } = await import("./workflow-runtime");
+  const { flushDueAutomationWebhooks } = await import("./automation-webhook");
   return {
     runNext: (claim) => runNextQueuedWorkflow(claim),
     concurrency: () => getWorkerConcurrency(),
     runScheduled: () => runScheduledType3(),
-    autoUpdate: () => runAutoUpdateIfDue(),
     recover: () => recoverOrphanedRuns(),
     isDriveConfigured: () => workerHasConfiguredDrive(),
+    flushAutomation: () => flushDueAutomationWebhooks(),
   };
 }
 
@@ -246,30 +229,39 @@ export function startBackgroundWorker(options?: { pollMs?: number; runtime?: Wor
   const pollMs = options?.pollMs ?? 3000;
   console.log(`[background-worker] started (poll ${pollMs}ms)`);
   const loadRuntime = options?.runtime ? async () => options.runtime! : defaultRuntime;
+  // Automation flush is independent of draining: a long acquisition must not hold
+  // a debounced SmartStrm task back (and vice versa).
+  const flushAutomation = async () => {
+    try {
+      const runtime = await loadRuntime();
+      const sent = await runtime.flushAutomation?.();
+      if (sent && sent > 0) {
+        console.log(`[background-worker] delivered ${sent} automation webhook(s)`);
+      }
+    } catch (error) {
+      console.error(
+        `[background-worker] automation flush failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   let running = false;
   const tick = async () => {
-    // An update is about to replace this process: start nothing new (see update-hold.ts).
-    if (running || isUpdateHoldActive(Date.now())) {
+    if (running) {
       return;
     }
     running = true;
     try {
-      // In flight for the updater's busy check: a tick may be between its hold check
-      // and claiming a run, or cleaning staging at the end of a patrol.
-      await whileInFlight(async () => {
-        const runtime = await loadRuntime();
-        const drained = await drainQueueOnce({
-          runNext: runtime.runNext,
-          runScheduled: runtime.runScheduled,
-          isDriveConfigured: runtime.isDriveConfigured,
-          autoUpdate: runtime.autoUpdate,
-          concurrency: runtime.concurrency,
-          pollMs,
-        });
-        if (drained > 0) {
-          console.log(`[background-worker] drained ${drained} queued run(s) this tick`);
-        }
+      const runtime = await loadRuntime();
+      const drained = await drainQueueOnce({
+        runNext: runtime.runNext,
+        runScheduled: runtime.runScheduled,
+        isDriveConfigured: runtime.isDriveConfigured,
+        concurrency: runtime.concurrency,
+        pollMs,
       });
+      if (drained > 0) {
+        console.log(`[background-worker] drained ${drained} queued run(s) this tick`);
+      }
     } finally {
       running = false;
     }
@@ -291,6 +283,10 @@ export function startBackgroundWorker(options?: { pollMs?: number; runtime?: Wor
     setInterval(() => {
       void tick();
     }, pollMs);
+    setInterval(() => {
+      void flushAutomation();
+    }, pollMs);
     void tick();
+    void flushAutomation();
   })();
 }

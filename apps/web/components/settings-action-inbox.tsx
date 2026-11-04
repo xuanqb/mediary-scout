@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CircleAlert, Rocket } from "lucide-react";
+import { AlertTriangle, CircleAlert } from "lucide-react";
 import type { SettingsAttentionItem, AttentionKind } from "../lib/settings-attention";
 import { DismissAttentionButton } from "./dismiss-attention-button";
 
@@ -7,18 +7,15 @@ import { DismissAttentionButton } from "./dismiss-attention-button";
  * Settings-page Action Inbox. Empty => render nothing (quiet is a feature).
  *
  * 视觉契约：卡片永远是标准面板底色；严重级别只通过左侧 3px 信号条 +
- * 条目图标色表达（info=绿/warning=琥珀/blocker=红）。「有新版本」是
- * 信息级（info）——它是新闻，不是警告。
+ * 条目图标色表达（info=绿/warning=琥珀/blocker=红）。
  */
-const KIND_ICON: Record<AttentionKind, typeof Rocket> = {
-  update_available: Rocket,
+const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = {
   frozen_drive: AlertTriangle,
   missing_llm: CircleAlert,
   search_source_unreachable: CircleAlert,
 };
 
 const KIND_CLASS: Record<AttentionKind, string> = {
-  update_available: "kind-info",
   frozen_drive: "kind-blocker",
   missing_llm: "kind-warning",
   search_source_unreachable: "kind-warning",

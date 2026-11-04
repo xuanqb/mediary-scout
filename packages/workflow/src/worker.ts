@@ -3,6 +3,7 @@ import { runKeyedPool } from "./keyed-pool.js";
 import type {
   AcquisitionSeasonScope,
   EpisodeState,
+  LibraryCategory,
   MediaTitle,
   MediaType,
   NotificationEvent,
@@ -33,6 +34,7 @@ import {
   summarizeErrorForNotification,
 } from "./agent-error.js";
 import { isFreeLlmPreset } from "./agent-model.js";
+import { libraryCategoryOf } from "./media-classification.js";
 import type { TitleResearchOptions } from "./acquisition-v2/title-research.js";
 import { formatReportPushText } from "./notification-report.js";
 import { isMovieUnreleased } from "./domain.js";
@@ -69,19 +71,68 @@ async function maybeFreezeOnBrandAuthError(input: {
 }
 
 /**
- * Pick the 115 landing parent for a title. Anime lands under its own parent
- * (when configured) so the 动漫 library shelf is a physically separate tree,
- * never intermixed with TV shows; everything else uses the default parent.
+ * Pick the landing parent for a title by its four-shelf library category. Anime
+ * and 综艺 get their own physically separate trees; a manual override to 电影
+ * routes there too. Missing category parents fall back to the TV parent.
  */
 export function storageParentForTitle(
-  title: { type: MediaType },
-  storageParentDirectoryId: string | undefined,
-  animeStorageParentDirectoryId: string | undefined,
+  title: { type: MediaType; libraryCategory?: LibraryCategory },
+  parents: {
+    tv: string | undefined;
+    anime: string | undefined;
+    movies?: string | undefined;
+    variety?: string | undefined;
+  },
 ): string | undefined {
-  if (title.type === "anime" && animeStorageParentDirectoryId !== undefined) {
-    return animeStorageParentDirectoryId;
+  const category = libraryCategoryOf(title);
+  if (category === "anime") return parents.anime ?? parents.tv;
+  if (category === "variety") return parents.variety ?? parents.tv;
+  if (category === "movies") return parents.movies ?? parents.tv;
+  return parents.tv;
+}
+
+/** Fail-open: an Emby outage must never block acquisition. */
+async function embyEpisodes(
+  resolver: ResolveEmbyAvailability | undefined,
+  title: MediaTitle,
+  seasons: number[],
+): Promise<string[]> {
+  if (!resolver) return [];
+  try {
+    return await resolver({ title, seasons });
+  } catch (error) {
+    console.warn(
+      `[emby] availability lookup failed for ${title.title}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return [];
   }
-  return storageParentDirectoryId;
+}
+
+/** Fail-open: an Emby outage must never block movie acquisition. */
+async function movieInEmbySafely(
+  resolver: ResolveMovieInEmby | undefined,
+  title: MediaTitle,
+): Promise<boolean> {
+  if (!resolver) return false;
+  try {
+    return await resolver({ title });
+  } catch (error) {
+    console.warn(
+      `[emby] movie lookup failed for ${title.title}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return false;
+  }
+}
+
+async function afterRunSafely(hook: (() => Promise<void>) | undefined): Promise<void> {
+  if (!hook) return;
+  try {
+    await hook();
+  } catch (error) {
+    console.warn(
+      `[emby] post-run hook failed (ignored): ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 /**
@@ -110,9 +161,13 @@ export async function resolveWorkerDeps(
   jevJudge: JevJudge | undefined;
   agentMemory: boolean | undefined;
   titleResearch: TitleResearchOptions | undefined;
+  emby: ResolveEmbyAvailability | undefined;
+  embyMovie: ResolveMovieInEmby | undefined;
+  afterRun: (() => Promise<void>) | undefined;
   storageParentDirectoryId: string | undefined;
   animeStorageParentDirectoryId: string | undefined;
   moviesParentDirectoryId: string | undefined;
+  varietyStorageParentDirectoryId: string | undefined;
   drives: AcquisitionDriveContext[] | undefined;
 }> {
   const ctx = resolve ? await resolve(accountId, connectedStorageId) : {};
@@ -138,12 +193,17 @@ export async function resolveWorkerDeps(
     // that is what they configured). With a resolver its answer is authoritative
     // — an account without one must not inherit another account's config.
     titleResearch: resolve ? ctx.titleResearch : base.titleResearch,
+    emby: resolve ? ctx.emby : base.emby,
+    embyMovie: resolve ? ctx.embyMovie : base.embyMovie,
+    afterRun: resolve ? ctx.afterRun : base.afterRun,
     storageParentDirectoryId:
       ctx.storageParentDirectoryId ?? base.storageParentDirectoryId,
     animeStorageParentDirectoryId:
       ctx.animeStorageParentDirectoryId ?? base.animeStorageParentDirectoryId,
     moviesParentDirectoryId:
       ctx.moviesParentDirectoryId ?? base.moviesParentDirectoryId,
+    varietyStorageParentDirectoryId:
+      ctx.varietyStorageParentDirectoryId ?? base.varietyStorageParentDirectoryId,
     drives: ctx.drives ?? base.drives,
   };
 }
@@ -166,10 +226,16 @@ export type SeasonMetadataSync = (input: {
  * language fall through to the globally-passed values. No resolver → the function
  * uses its input deps unchanged (single-user / tests).
  */
-/** Asked right before a run is claimed or reserved as running. False = start nothing
- *  now (the web process is about to be replaced by an update); queued runs stay
- *  queued. Absent = always allowed. */
-export type MayStartRun = () => boolean;
+
+/** Asked right before a TV run: which episode codes (S01E01) already exist in the
+ *  user's Emby library. Those are skipped by search but NOT marked as obtained. */
+export type ResolveEmbyAvailability = (input: {
+  title: MediaTitle;
+  seasons: number[];
+}) => Promise<string[]>;
+
+/** Asked before a movie run: whether the film is already in Emby. Fail-open → false. */
+export type ResolveMovieInEmby = (input: { title: MediaTitle }) => Promise<boolean>;
 
 export interface AccountWorkerContext {
   storage?: StorageExecutor;
@@ -193,9 +259,16 @@ export interface AccountWorkerContext {
   agentMemory?: boolean;
   /** Web-reference tools, resolved from the account's LLM endpoint. */
   titleResearch?: TitleResearchOptions;
+  /** Resolves Emby episodes already present for a title (fail-open: absent/throw = none). */
+  emby?: ResolveEmbyAvailability;
+  /** Resolves whether a film is already present in Emby (fail-open: absent/throw = false). */
+  embyMovie?: ResolveMovieInEmby;
+  /** Best-effort post-run hook (e.g. one Emby library scan after files land). */
+  afterRun?: () => Promise<void>;
   storageParentDirectoryId?: string;
   animeStorageParentDirectoryId?: string;
   moviesParentDirectoryId?: string;
+  varietyStorageParentDirectoryId?: string;
   /** Ordered active drives for this account in unified multi-drive mode. */
   drives?: AcquisitionDriveContext[];
 }
@@ -462,17 +535,15 @@ export async function runQueuedType2Workflow(input: {
   storageParentDirectoryId?: string;
   /** Separate landing parent for anime (see runQueuedSeriesInitialization). */
   animeStorageParentDirectoryId?: string;
+  /** Separate landing parent for 综艺 shows. */
+  varietyStorageParentDirectoryId?: string;
   /** §7: resolve the claimed run's per-account 115 creds + landing CIDs. */
   resolveAccountContext?: ResolveAccountWorkerContext;
   onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-  mayStartRun?: MayStartRun;
   /** The worker's drive filter and claim callback when queued runs go side by side. */
   claim?: QueueClaimOptions;
 }): Promise<QueuedType2WorkerResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  if (input.mayStartRun && !input.mayStartRun()) {
-    return { status: "idle" };
-  }
   const claimed = await claimNextQueuedRun(input.repository, "type2_init", now(), input.claim);
   if (!claimed) {
     return { status: "idle" };
@@ -490,16 +561,22 @@ export async function runQueuedType2Workflow(input: {
       input,
     );
     resolvedLlmConfig = deps.llmConfig;
+    const emby = await embyEpisodes(deps.emby, claimed.title, [claimed.season.seasonNumber]);
     const result = await runType2InitializationV2AndPersist({
       title: claimed.title,
       season: claimed.season,
       categoryParentId: requireCategoryParent(
         storageParentForTitle(
           claimed.title,
-          deps.storageParentDirectoryId,
-          deps.animeStorageParentDirectoryId,
+          {
+            tv: deps.storageParentDirectoryId,
+            anime: deps.animeStorageParentDirectoryId,
+            movies: deps.moviesParentDirectoryId,
+            variety: deps.varietyStorageParentDirectoryId,
+          },
         ),
       ),
+      ...(emby.length > 0 ? { embyAvailableEpisodes: emby } : {}),
       resourceProvider: deps.resourceProvider,
       storage: deps.storage,
       model: deps.model,
@@ -538,6 +615,9 @@ export async function runQueuedType2Workflow(input: {
       },
       now,
     });
+    if (result.status === "succeeded" || result.status === "partial") {
+      await afterRunSafely(deps.afterRun);
+    }
 
     return {
       status: "ran",
@@ -605,6 +685,8 @@ export async function runScheduledType3Monitoring(input: {
   /** Separate landing parent for anime, so anime patrol verify-or-creates under
    *  its own tree (see runQueuedSeriesInitialization). */
   animeStorageParentDirectoryId?: string;
+  /** Separate landing parent for 综艺 shows. */
+  varietyStorageParentDirectoryId?: string;
   /** Movies category parent. When set, the sweep also patrols tracked-but-
    *  unobtained films, dispatching the MOVIE agent (by title.type) — 已上映无源
    *  films get retried until covered. Unset → movies are left alone. */
@@ -626,7 +708,6 @@ export async function runScheduledType3Monitoring(input: {
   resolveDriveId?: (accountId: string) => Promise<string | null>;
   /** Checked before each show's run is reserved; a false stops the rest of the sweep
    *  from starting (those shows are reported skipped_active). */
-  mayStartRun?: MayStartRun;
 }): Promise<ScheduledType3Outcome[]> {
   const now = input.now ?? (() => new Date().toISOString());
   // Cross-account: patrol EVERY user's tracked shows, each under its owner's creds.
@@ -815,9 +896,6 @@ async function patrolTrackedState(args: {
       input.staleActiveRunTimeoutMs,
     );
 
-    if (input.mayStartRun && !input.mayStartRun()) {
-      return { trackedSeasonId: season.id, status: "skipped_active" };
-    }
     const reservation = await input.repository.reserveWorkflowRun({
       accountId: state.accountId,
       connectedStorageId: state.connectedStorageId,
@@ -861,6 +939,7 @@ async function patrolTrackedState(args: {
       return { trackedSeasonId: season.id, status: "skipped_active" };
     }
 
+    const emby = await embyEpisodes(deps.emby, state.title, [season.seasonNumber]);
     const runOnce = () =>
       runType3MonitoringV2AndPersist({
         title: state.title,
@@ -869,10 +948,15 @@ async function patrolTrackedState(args: {
         categoryParentId: requireCategoryParent(
           storageParentForTitle(
             state.title,
-            deps.storageParentDirectoryId,
-            deps.animeStorageParentDirectoryId,
+            {
+              tv: deps.storageParentDirectoryId,
+              anime: deps.animeStorageParentDirectoryId,
+              movies: deps.moviesParentDirectoryId,
+              variety: deps.varietyStorageParentDirectoryId,
+            },
           ),
         ),
+        ...(emby.length > 0 ? { embyAvailableEpisodes: emby } : {}),
         resourceProvider: deps.resourceProvider,
         storage: deps.storage,
         model: deps.model,
@@ -920,13 +1004,15 @@ async function patrolTrackedState(args: {
         }
         result = await runOnce();
       }
+      if (result.status === "succeeded" || result.status === "partial") {
+        await afterRunSafely(deps.afterRun);
+      }
       return {
         trackedSeasonId: state.season.id,
         status: "ran",
         workflowRunId,
         workflowStatus: result.status,
-      };
-    } catch (error) {
+      };    } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : "Workflow failed";
       console.log(
@@ -988,7 +1074,6 @@ async function patrolMovie(args: {
     createWorkflowRunId?: () => string;
     staleActiveRunTimeoutMs?: number;
     onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-    mayStartRun?: MayStartRun;
   };
   deps: {
     resourceProvider: ResourceProvider;
@@ -1002,6 +1087,8 @@ async function patrolMovie(args: {
     jevJudge: JevJudge | undefined;
     agentMemory: boolean | undefined;
     titleResearch: TitleResearchOptions | undefined;
+    embyMovie: ResolveMovieInEmby | undefined;
+    afterRun: (() => Promise<void>) | undefined;
     moviesParentDirectoryId: string | undefined;
     drives: AcquisitionDriveContext[] | undefined;
   };
@@ -1030,6 +1117,11 @@ async function patrolMovie(args: {
   if (obtained) {
     return null;
   }
+  // Already in Emby: don't search. The reserved run below persists the
+  // availableInEmby state (once) so the UI stops calling it missing.
+  const embyPresent =
+    state.episodes.some((episode) => episode.availableInEmby) ||
+    (await movieInEmbySafely(deps.embyMovie, state.title));
   // Air-time gate: a reserved (未上映) film whose release date is still in the
   // future stays reserved — the agent must NOT run before release. Once the date
   // arrives this gate opens and the patrol collects it (点预定 → 上映后自然收).
@@ -1043,9 +1135,6 @@ async function patrolMovie(args: {
     startedAt,
     input.staleActiveRunTimeoutMs,
   );
-  if (input.mayStartRun && !input.mayStartRun()) {
-    return { trackedSeasonId: state.season.id, status: "skipped_active" };
-  }
   const reservation = await input.repository.reserveWorkflowRun({
     accountId: state.accountId,
     connectedStorageId: state.connectedStorageId,
@@ -1118,6 +1207,7 @@ async function patrolMovie(args: {
           ? {}
           : { titleResearch: deps.titleResearch }),
       ...(deps.drives === undefined ? {} : { drives: deps.drives }),
+      ...(embyPresent ? { alreadyInEmby: true } : {}),
       // Reported in the sweep's daily digest, like the shows, not pushed on its own.
       notice: { trigger: "scheduled", routineIfNothingReplaced: false },
       workflowRun: { id: workflowRunId, startedAt, finishedAt: null },
@@ -1137,6 +1227,9 @@ async function patrolMovie(args: {
         throw firstError;
       }
       result = await runOnce();
+    }
+    if (result.status === "succeeded" || result.status === "partial") {
+      await afterRunSafely(deps.afterRun);
     }
     return {
       trackedSeasonId: state.season.id,
@@ -1219,7 +1312,7 @@ function staleStartedBefore(
 export function requireCategoryParent(parent: string | undefined): string {
   if (parent === undefined || parent === "") {
     throw new Error(
-      "MEDIA_TRACK_CATEGORY_PARENT_REQUIRED: a library category parent (Movies/TV/Anime) is required for directory verify-or-create",
+      "MEDIA_TRACK_CATEGORY_PARENT_REQUIRED: a library category parent (Movies/TV/Variety/Anime) is required for directory verify-or-create",
     );
   }
   return parent;
@@ -1241,14 +1334,10 @@ export async function runQueuedMovieAcquisition(input: {
   /** §7: resolve the claimed run's per-account 115 creds + landing CIDs. */
   resolveAccountContext?: ResolveAccountWorkerContext;
   onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-  mayStartRun?: MayStartRun;
   /** The worker's drive filter and claim callback when queued runs go side by side. */
   claim?: QueueClaimOptions;
 }): Promise<QueuedType2WorkerResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  if (input.mayStartRun && !input.mayStartRun()) {
-    return { status: "idle" };
-  }
   const claimed = await claimNextQueuedRun(input.repository, "movie_init", now(), input.claim);
   if (!claimed) {
     return { status: "idle" };
@@ -1265,10 +1354,12 @@ export async function runQueuedMovieAcquisition(input: {
       input,
     );
     resolvedLlmConfig = deps.llmConfig;
+    const alreadyInEmby = await movieInEmbySafely(deps.embyMovie, claimed.title);
     const result = await runMovieAcquisitionV2AndPersist({
       title: claimed.title,
       categoryParentId:
         deps.moviesParentDirectoryId ?? input.moviesParentDirectoryId,
+      ...(alreadyInEmby ? { alreadyInEmby: true } : {}),
       resourceProvider: deps.resourceProvider,
       storage: deps.storage,
       model: deps.model,
@@ -1305,6 +1396,9 @@ export async function runQueuedMovieAcquisition(input: {
       },
       now,
     });
+    if (result.status === "succeeded" || result.status === "partial") {
+      await afterRunSafely(deps.afterRun);
+    }
     return {
       status: "ran",
       workflowRunId: claimed.workflowRun.id,
@@ -1342,18 +1436,16 @@ export async function runQueuedSeriesInitialization(input: {
   /** Separate landing parent for anime, so the 动漫 shelf is physically its own
    *  tree on 115 and never mixed into the TV shows directory. */
   animeStorageParentDirectoryId?: string;
+  /** Separate landing parent for 综艺 shows. */
+  varietyStorageParentDirectoryId?: string;
   now?: () => string;
   /** §7: resolve the claimed run's per-account 115 creds + landing CIDs. */
   resolveAccountContext?: ResolveAccountWorkerContext;
   onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-  mayStartRun?: MayStartRun;
   /** The worker's drive filter and claim callback when queued runs go side by side. */
   claim?: QueueClaimOptions;
 }): Promise<QueuedType2WorkerResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  if (input.mayStartRun && !input.mayStartRun()) {
-    return { status: "idle" };
-  }
   const claimed = await claimNextQueuedRun(input.repository, "type1_package_init", now(), input.claim);
   if (!claimed) {
     return { status: "idle" };
@@ -1380,16 +1472,26 @@ export async function runQueuedSeriesInitialization(input: {
         "Queued series initialization run is missing its season metadata",
       );
     }
+    const emby = await embyEpisodes(
+      deps.emby,
+      claimed.title,
+      seasons.map((season) => season.seasonNumber),
+    );
     const result = await runSeriesInitializationV2AndPersist({
       title: claimed.title,
       seasons,
       categoryParentId: requireCategoryParent(
         storageParentForTitle(
           claimed.title,
-          deps.storageParentDirectoryId,
-          deps.animeStorageParentDirectoryId,
+          {
+            tv: deps.storageParentDirectoryId,
+            anime: deps.animeStorageParentDirectoryId,
+            movies: deps.moviesParentDirectoryId,
+            variety: deps.varietyStorageParentDirectoryId,
+          },
         ),
       ),
+      ...(emby.length > 0 ? { embyAvailableEpisodes: emby } : {}),
       seasonQualityRecord: claimed.season.qualityPreference,
       resourceProvider: deps.resourceProvider,
       storage: deps.storage,
@@ -1450,6 +1552,9 @@ export async function runQueuedSeriesInitialization(input: {
       transferAttempts: [],
       notifications: [],
     });
+    if (result.status === "succeeded" || result.status === "partial") {
+      await afterRunSafely(deps.afterRun);
+    }
     return {
       status: "ran",
       workflowRunId: claimed.workflowRun.id,

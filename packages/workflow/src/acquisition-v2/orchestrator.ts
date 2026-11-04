@@ -1,7 +1,7 @@
 import { memoryTitleKey, type AgentMemory, type AgentMemoryStore } from "../agent-memory.js";
 import { buildReflectionDigest, runMemoryReflection } from "./agent-loop.js";
 import type { LanguageModel } from "ai";
-import type { AgentDecision, AuditEvent, ResourceSnapshot, TransferAttempt } from "../domain.js";
+import type { AgentDecision, AuditEvent, LibraryCategory, ResourceSnapshot, TransferAttempt } from "../domain.js";
 import type { AcquisitionDriveContext, ResourceProvider, StorageExecutor } from "../ports.js";
 import type { AcquisitionAgentResult } from "./agent-loop.js";
 import type { AgentToolEvent } from "./activity.js";
@@ -87,6 +87,9 @@ export interface RunAcquisitionV2Request {
   /** The task's fine-grained search profile — enables the anime taboo-keyword
    *  validator (warnings only, never blocking). 病2b。 */
   searchProfile?: SearchProfile;
+  /** Four-shelf library category. When set, multi-drive directory routing uses it
+   *  verbatim (manual override); otherwise it is inferred from the search profile. */
+  libraryCategory?: LibraryCategory;
   /** The run's drive brand — selects the brand transfer model + dead-links section. */
   storageProvider?: string;
   /** Filters known-dead candidates from search results before the agent sees them,
@@ -805,8 +808,10 @@ function createStorageAdapter(
     return request.multiDriveCoordinator;
   }
   if (request.drives && request.drives.length > 0 && !request.stagingRecovery) {
-    let categoryKey: "tv" | "anime" | "movies" = "tv";
-    if (request.target.kind === "movie") {
+    let categoryKey: LibraryCategory = "tv";
+    if (request.libraryCategory) {
+      categoryKey = request.libraryCategory;
+    } else if (request.target.kind === "movie") {
       categoryKey = "movies";
     } else if (request.searchProfile === "cn-anime" || request.searchProfile === "jp-anime") {
       categoryKey = "anime";

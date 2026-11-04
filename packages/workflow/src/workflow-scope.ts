@@ -105,8 +105,8 @@ export interface WorkspaceSwitcherItem {
 }
 
 /** The switcher chip's brand label, sourced from the brand registry so every
- *  brand (115 / 夸克 / 光鸭) reads correctly — not a 夸克-vs-115 ternary that
- *  mislabels a 光鸭 drive as "115". Falls back to the raw provider for an
+ *  brand (115 / 夸克) reads correctly — not a 115-only ternary that
+ *  mislabels a 夸克 drive as "115". Falls back to the raw provider for an
  *  unknown / undefined provider. */
 function providerLabel(provider: string | undefined): string {
   return provider !== undefined && isRegisteredStorageProvider(provider)

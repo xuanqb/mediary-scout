@@ -69,7 +69,7 @@
         <div class="nav-links">
           <a href="/features/multi-drive-agent/">多盘协作</a>
           <span aria-hidden="true">·</span>
-          <a href="/guides/which-cloud-drive/">六盘实测对比</a>
+          <a href="/guides/which-cloud-drive/">网盘实测对比</a>
           <span aria-hidden="true">·</span>
           <a href="/guides/docker-nas-deploy/">NAS 部署</a>
           <span aria-hidden="true">·</span>
@@ -90,6 +90,7 @@
   </nav>
 
   <main id="main" class="article">
+    <div class="callout" style="border-color:rgba(255,193,7,.45);background:rgba(255,193,7,.08);margin:16px 0"><p><strong>当前版本仅支持 115 与夸克网盘。</strong>本页包含历史对比数据，其他网盘品牌已不再支持；Docker 部署与最新功能见 <a href="/guides/docker-nas-deploy/">部署指南</a>。</p></div>
     <p class="crumb"><a href="/">巡影 Mediary Scout 首页</a> › 方案对比 › 对比 MoviePilot / Sonarr / CloudDrive2</p>
 
     <h1>巡影 Mediary Scout vs MoviePilot / Sonarr / CloudDrive2：自动追剧工具怎么选？</h1>
@@ -169,7 +170,7 @@
       <li><strong>你的主力存储是云网盘（夸克 / UC / 115 / 123 / 光鸭 / 天翼）</strong>：不想买几千块钱的大容量 NAS 机械硬盘，也不想应付 PT 站严苛的分享率考核和每月的保种电费。</li>
       <li><strong>你厌倦了维护正则表达式和被黑盒分享包坑</strong>：网盘分享链的标题千奇百怪（比如把广告视频混在剧集里、或者文件夹名叫「新建文件夹」）。巡影的 Agent 会先转进临时 <code>staging</code> 目录，<strong>回读真实文件大小和集数</strong>，删掉广告和低码率重复集后再放进正式库。</li>
       <li><strong>你手里有多块网盘，希望它们合体成一个库</strong>：比如夸克会员过期超额了，还有 UC 6TB、123 20TB、115 40TB 和光鸭 500TB。巡影会自动避开超额的夸克，优先在单块盘收齐，单盘不全时跨盘互补（参见 <a href="/features/multi-drive-agent/">多网盘统一协作机制</a>）。</li>
-      <li><strong>你想要开箱即用的桌面软件或极简软路由容器</strong>：巡影提供带 Apple 签名公证的 macOS 桌面版、Windows 桌面版，以及能在 2GB 内存软路由（如 iStoreOS）上流畅运行的 Docker 栈。</li>
+      <li><strong>你想要开箱即用的极简容器</strong>：巡影提供能在一台常开 NAS、软路由（如 iStoreOS）或 Linux 主机上流畅运行的 Docker 栈。</li>
     </ul>
 
     <h2>三、巡影 Mediary Scout 与 CloudDrive2 / AList / Infuse 是什么关系？</h2>
@@ -195,7 +196,7 @@
     <p>而且因为巡影所有的转存、改名和去重都走网盘官方 Web API 直接在云端完成（而不是通过 FUSE 本地挂载盘去全盘高频扫盘），<strong>不会触发网盘针对挂载扫盘的 403 风控冻结</strong>。等巡影把文件干干净净放进 <code>Season 01</code> 后，你打开 Apple TV / Mac / iPad 上的 Infuse 或 VidHub 直接点播即可！</p>
 
     <div class="next">
-      <p>下一步：<a href="/guides/which-cloud-drive/">查看六大网盘实测资源量对比</a> · <a href="/guides/docker-nas-deploy/">阅读 NAS / Docker 一键部署指南</a> · <a href="/">返回首页下载桌面版</a></p>
+      <p>下一步：<a href="/guides/which-cloud-drive/">查看网盘实测资源量对比</a> · <a href="/guides/docker-nas-deploy/">阅读 NAS / Docker 一键部署指南</a> · <a href="/">返回首页</a></p>
     </div>
   </main>
 
@@ -205,7 +206,7 @@
         <h3>产品与核心功能</h3>
         <ul>
           <li><a href="/">巡影 Mediary Scout 首页</a></li>
-          <li><a href="https://github.com/fancydirty/mediary-scout/releases/latest">桌面版下载（macOS / Windows）</a></li>
+          <li><a href="/guides/docker-nas-deploy/">Docker / NAS 部署教程</a></li>
           <li><a href="/features/multi-drive-agent/">多网盘统一协作与容量保护</a></li>
           <li><a href="/features/smart-search-and-subtitles/">留言换源与自动补配中文字幕</a></li>
           <li><a href="/features/agent-api/">Agent HTTP API</a></li>
@@ -215,9 +216,9 @@
         <h3>指南、教程与对比</h3>
         <ul>
           <li><a href="/guides/">教程与指南中心</a></li>
-          <li><a href="/guides/which-cloud-drive/">六大网盘实测资源量对比</a></li>
+          <li><a href="/guides/which-cloud-drive/">网盘实测资源量对比</a></li>
           <li><a href="/guides/docker-nas-deploy/">NAS / 软路由 Docker 部署教程</a></li>
-          <li><a href="/guides/cloud-drive-setup/">六大网盘扫码连接与搜索源配置</a></li>
+          <li><a href="/guides/cloud-drive-setup/">115 / 夸克连接与搜索源配置</a></li>
           <li><a href="/compare/mediary-scout-vs-moviepilot-sonarr/">对比 MoviePilot / Sonarr / CloudDrive2</a></li>
         </ul>
       </div>

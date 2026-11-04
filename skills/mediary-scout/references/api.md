@@ -1,6 +1,6 @@
 # Mediary Scout Agent API — 完整端点文档
 
-本机 Mediary Scout（自托管媒体获取 agent）的本地 HTTP API。任意 coding agent 无需打开桌面客户端，即可改配置、找片、查库存与进度。所有端点前缀 `/api/agent/`。
+自托管 Mediary Scout（媒体获取 agent）的本地 HTTP API。任意 coding agent 无需打开网页，即可改配置、找片、查库存与进度。所有端点前缀 `/api/agent/`。
 
 > 与 `SKILL.md` 同仓同版本。API 变更应同 PR 更新本文件。
 
@@ -10,17 +10,16 @@
 
 ### 发现文件
 
-桌面 app boot 成功后写入 `~/.mediary/agent.json`（权限 0600）；Docker 实例没有这一步，由用户在跑 agent 的电脑上按仓库 `docs/agent-api.md` 手动建同样格式的文件：
+由用户在跑 agent 的电脑上按仓库 `docs/agent-api.md` 手动建 `~/.mediary/agent.json`（权限 0600）：
 
 ```json
-{ "baseUrl": "http://127.0.0.1:<port>", "token": "<hex>", "version": "<app version>" }
+{ "baseUrl": "http://127.0.0.1:<port>", "token": "<hex>" }
 ```
 
-- App 退出**不**删除此文件。
-- 遇 `connection refused` → 桌面版：app 未运行（不是没配置）。Docker：实例没在跑，或文件里的 `baseUrl` 从这台电脑连不上。
-- 文件缺失 → 桌面版：app 从未成功启动过，让用户打开桌面 app。Docker：用户还没建这个文件，按 `docs/agent-api.md` 建。
+- 遇 `connection refused` → 实例没在跑，或文件里的 `baseUrl` 从这台电脑连不上。
+- 文件缺失 → 用户还没建这个文件，按 `docs/agent-api.md` 建。
 
-Token 由 Electron 主进程首启生成（32 字节 hex），持久化在 userData（`agent-token` 文件），通过环境变量 `MEDIA_TRACK_AGENT_TOKEN` 注入 server。容器版由运维显式设同名 env——desktop 与容器完全对称。
+Token 由运维在 `.env` 里设置 `MEDIA_TRACK_AGENT_TOKEN`（32 字节 hex）并注入 server。
 
 ### 鉴权头
 
@@ -49,9 +48,9 @@ curl -H "Authorization: Bearer $TOKEN" "$BASE/api/agent/<endpoint>"
 
 | 状态码 | 触发条件 | 响应要点 | agent 应对 |
 |---|---|---|---|
-| `404` | 环境未配置 agent token（端点隐身） | 端点整体不存在/不可用 | 桌面版：提示用户启动桌面 app；Docker：提示用户在 `.env` 设 `MEDIA_TRACK_AGENT_TOKEN` 后 `docker compose up -d` |
+| `404` | 环境未配置 agent token（端点隐身） | 端点整体不存在/不可用 | 提示用户在 `.env` 设 `MEDIA_TRACK_AGENT_TOKEN` 后 `docker compose up -d` |
 | `404` | `acquire` TMDB 无匹配 | 无 `candidates`、无 `matched` | 告诉用户没搜到，建议换关键词/补 `type` |
-| `401` | token 错误 | `WWW-Authenticate: Bearer` | 桌面版：token 失效，让用户重开桌面 app 重新生成 agent.json；Docker：agent.json 里的 token 和 `.env` 的 `MEDIA_TRACK_AGENT_TOKEN` 不一致，让用户改成同一个 |
+| `401` | token 错误 | `WWW-Authenticate: Bearer` | agent.json 里的 token 和 `.env` 的 `MEDIA_TRACK_AGENT_TOKEN` 不一致，让用户改成同一个 |
 | `409` | `acquire` 多个高分候选 | `{ "candidates": [top5] }` | 列候选给用户挑，带 `tmdbId` 重发。**绝不瞎猜** |
 | `403` | demo 模式 | 全端点拒绝 | 告诉用户这是只读 demo，无法执行写操作 |
 | `400` | 校验失败 / 回写脱敏占位值 | 具体字段与原因 | 修正 body 后重试；脱敏值禁止回写 |
@@ -98,7 +97,7 @@ curl -H "Authorization: Bearer $TOKEN" "$BASE/api/agent/config"
 
 ## PUT /api/agent/config
 
-部分更新配置：body 传哪些字段就改哪些字段，底层复用桌面 app 既有 save 函数的校验逻辑。
+部分更新配置：body 传哪些字段就改哪些字段，底层复用网页端既有 save 函数的校验逻辑。
 
 **请求**
 
@@ -120,7 +119,7 @@ curl -X PUT \
 
 - **拒绝脱敏占位值回写**：任何秘密字段值以 `***` 开头或含 `***` → `400`。防止 agent 把 GET 读到的脱敏值写回、毁掉真凭据。
 - **秘密字段仅在用户明确提供新明文值时才写**：LLM `apiKey`、`tmdbApiKey`、`prowlarr.apiKey`、`push.*` 密钥等，用户没给新值就不要放进 body。
-- **不接受 `storages`**：改盘绑定要在桌面 app 做（QR/凭据交互无法 agent 化）。
+- **不接受 `storages`**：改盘绑定要在网页设置里做（QR/凭据交互无法 agent 化）。
 - **校验失败 → 400**：响应含具体字段名与失败原因，据此修正后重试。
 
 **可写字段（示例）**：`qualityPreference`、`preferredLanguage`、`dailySweepTime`、`pansouBaseUrl`、`llm.{baseURL,modelId,apiKey}`、`prowlarr.{baseURL,apiKey}`、`tmdbApiKey`、`push.{bark,serverchan,…}`。以 GET 返回的结构为准。
@@ -236,7 +235,7 @@ curl -H "Authorization: Bearer $TOKEN" "$BASE/api/agent/activity?limit=20"
 
 ## 范围说明（v1 明确不做）
 
-- 网盘绑定 API（QR 交互无法 agent 化，改盘在桌面 app 做）
+- 网盘绑定 API（QR 交互无法 agent 化，改盘在网页设置里做）
 - 多用户 agent 授权（v1 只服务 owner）
 - 取消 / untrack / 重试等生命周期写操作
 - WebSocket 推送

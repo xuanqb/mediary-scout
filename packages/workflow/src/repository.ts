@@ -11,6 +11,7 @@ import {
   type DriveSpaceCacheEntry,
   type EpisodeCopy,
   type EpisodeState,
+  type LibraryCategory,
   type MediaTitle,
   type NotificationEvent,
   type ResourceSnapshot,
@@ -467,6 +468,10 @@ export interface WorkflowRepository extends DeadLinkStore, AgentMemoryStore, Use
     trackedSeasonId: string,
     accountId?: string,
   ): Promise<CrossDriveEpisodeOwnership[]>;
+  /** Read a media title by id (global metadata cache). */
+  getMediaTitle(titleId: string): Promise<MediaTitle | null>;
+  /** Persist a manual library-shelf override on the global title payload. */
+  setMediaTitleLibraryCategory(titleId: string, category: LibraryCategory): Promise<boolean>;
   // recordDeadLink + listDeadLinkKeys come from DeadLinkStore.
 }
 
@@ -591,6 +596,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       rootCid: row.rootCid ?? null,
       moviesCid: row.moviesCid ?? null,
       tvCid: row.tvCid ?? null,
+      varietyCid: row.varietyCid ?? null,
       animeCid: row.animeCid ?? null,
       // Mirror Postgres: ON CONFLICT refresh does NOT touch status, so a re-scan
       // (refresh) keeps an existing frozen state until an explicit unfreeze.
@@ -892,6 +898,29 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       if (snapshot.title.id === titleKey) return snapshot.title.title;
     }
     return null;
+  }
+
+  async getMediaTitle(titleId: string): Promise<MediaTitle | null> {
+    for (const snapshot of this.workflowRuns.values()) {
+      if (snapshot.title.id === titleId) return cloneWorkflowValue(snapshot.title);
+    }
+    return null;
+  }
+
+  async setMediaTitleLibraryCategory(
+    titleId: string,
+    category: LibraryCategory,
+  ): Promise<boolean> {
+    let updated = false;
+    for (const [runId, snapshot] of this.workflowRuns) {
+      if (snapshot.title.id !== titleId) continue;
+      this.workflowRuns.set(runId, {
+        ...snapshot,
+        title: { ...snapshot.title, libraryCategory: category },
+      });
+      updated = true;
+    }
+    return updated;
   }
 
   async summarizeAgentMemories(input: { accountId: string; since: string }): Promise<AgentMemorySummary> {

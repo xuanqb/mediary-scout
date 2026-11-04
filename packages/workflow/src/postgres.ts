@@ -13,6 +13,7 @@ import {
   type DriveSpaceCacheEntry,
   type EpisodeCopy,
   type EpisodeState,
+  type LibraryCategory,
   type MediaTitle,
   type NotificationEvent,
   type ResourceSnapshot,
@@ -187,10 +188,12 @@ const SCHEMA = `
     root_cid text,
     movies_cid text,
     tv_cid text,
+    variety_cid text,
     anime_cid text,
     created_at text NOT NULL,
     UNIQUE (provider, provider_uid)
   );
+  ALTER TABLE connected_storages ADD COLUMN IF NOT EXISTS variety_cid text;
   CREATE TABLE IF NOT EXISTS agent_memories (
     id text PRIMARY KEY,
     account_id text NOT NULL,
@@ -1314,7 +1317,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async listConnectedStorages(accountId: string): Promise<ConnectedStorage[]> {
     await this.ensureSchema();
     const result = await this.pool.query(
-      "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
+      "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, variety_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
         "FROM connected_storages WHERE account_id = $1 ORDER BY created_at",
       [accountId],
     );
@@ -1340,11 +1343,11 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     // the DB-level backstop.
     await this.pool.query(
       "INSERT INTO connected_storages " +
-        "(id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, anime_cid, created_at) " +
-        "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11) " +
+        "(id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, variety_cid, anime_cid, created_at) " +
+        "VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12) " +
         "ON CONFLICT (provider, provider_uid) DO UPDATE SET " +
         "label = EXCLUDED.label, payload = EXCLUDED.payload, " +
-        "root_cid = EXCLUDED.root_cid, movies_cid = EXCLUDED.movies_cid, tv_cid = EXCLUDED.tv_cid, anime_cid = EXCLUDED.anime_cid " +
+        "root_cid = EXCLUDED.root_cid, movies_cid = EXCLUDED.movies_cid, tv_cid = EXCLUDED.tv_cid, variety_cid = EXCLUDED.variety_cid, anime_cid = EXCLUDED.anime_cid " +
         "WHERE connected_storages.account_id = EXCLUDED.account_id",
       [
         row.id,
@@ -1356,6 +1359,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
         row.rootCid ?? null,
         row.moviesCid ?? null,
         row.tvCid ?? null,
+        row.varietyCid ?? null,
         row.animeCid ?? null,
         row.createdAt,
       ],
@@ -1383,7 +1387,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   > {
     return this.withTransaction(async (client) => {
       const locked = await client.query(
-        "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
+        "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, variety_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
           "FROM connected_storages WHERE id = $1 AND account_id = $2 FOR UPDATE",
         [storageId, accountId],
       );
@@ -1417,7 +1421,7 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   ): Promise<ConnectedStorage | null> {
     await this.ensureSchema();
     const result = await this.pool.query(
-      "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
+      "SELECT id, account_id, provider, provider_uid, label, payload, root_cid, movies_cid, tv_cid, variety_cid, anime_cid, status, frozen_reason, frozen_at, created_at " +
         "FROM connected_storages WHERE provider = $1 AND provider_uid = $2",
       [provider, providerUid],
     );
@@ -1791,6 +1795,24 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     await this.ensureSchema();
     const result = await this.pool.query<{ title: string | null }>("SELECT payload->>'title' AS title FROM media_titles WHERE id = $1", [titleKey]);
     return result.rows[0]?.title ?? null;
+  }
+
+  async getMediaTitle(titleId: string): Promise<MediaTitle | null> {
+    await this.ensureSchema();
+    const result = await this.pool.query("SELECT payload FROM media_titles WHERE id = $1", [titleId]);
+    return (result.rows[0]?.payload as MediaTitle | undefined) ?? null;
+  }
+
+  async setMediaTitleLibraryCategory(
+    titleId: string,
+    category: LibraryCategory,
+  ): Promise<boolean> {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      "UPDATE media_titles SET payload = jsonb_set(payload, '{libraryCategory}', to_jsonb($2::text), true) WHERE id = $1",
+      [titleId, category],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async summarizeAgentMemories(input: { accountId: string; since: string }): Promise<AgentMemorySummary> {
@@ -2438,6 +2460,7 @@ function connectedStorageFromRow(row: Record<string, unknown>): ConnectedStorage
     rootCid: (row.root_cid as string | null | undefined) ?? null,
     moviesCid: (row.movies_cid as string | null | undefined) ?? null,
     tvCid: (row.tv_cid as string | null | undefined) ?? null,
+    varietyCid: (row.variety_cid as string | null | undefined) ?? null,
     animeCid: (row.anime_cid as string | null | undefined) ?? null,
     status: (row.status as "active" | "frozen" | null | undefined) ?? "active",
     frozenReason: (row.frozen_reason as string | null | undefined) ?? null,

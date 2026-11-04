@@ -216,6 +216,7 @@ export async function seedDemoWorkflowRepository(repository: WorkflowRepository)
     rootCid: "demo_root_115",
     moviesCid: "demo_movies_115",
     tvCid: "demo_tv_115",
+    varietyCid: "demo_variety_115",
     animeCid: "demo_anime_115",
     createdAt: "2026-06-01T00:00:00.000Z",
   });
@@ -229,6 +230,7 @@ export async function seedDemoWorkflowRepository(repository: WorkflowRepository)
     rootCid: "demo_root_q",
     moviesCid: "demo_movies_q",
     tvCid: "demo_tv_q",
+    varietyCid: "demo_variety_q",
     animeCid: "demo_anime_q",
     createdAt: "2026-06-05T00:00:00.000Z",
   });

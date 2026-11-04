@@ -6,7 +6,7 @@ function okResponse(items: unknown[]) {
   return { code: 0, requestId: "idr_api_test", result: { items, pagination: { page: 1, pageSize: 100, total: items.length } } };
 }
 
-function provider(fetchJson: HaisouFetchJson, extra?: { allowedTypes?: readonly ("115" | "quark" | "uc" | "tianyi" | "123" | "guangya" | "magnet" | "manual")[] }) {
+function provider(fetchJson: HaisouFetchJson, extra?: { allowedTypes?: readonly ("115" | "quark" | "magnet" | "manual")[] }) {
   return new HaisouResourceProvider({
     apiKey: "idr_test",
     fetchJson,
@@ -90,19 +90,6 @@ describe("HaisouResourceProvider", () => {
     const snap = await p.search({ keyword: "沙丘" });
     expect(snap.candidates[0]!.title).toBe("a 沙丘 b");
     expect(snap.candidates[0]!.providerPayload["password"]).toBe("x1y2");
-  });
-
-  it("keeps guangya — the platform the official docs don't list but the API serves", async () => {
-    const p = provider(async () => okResponse([
-      {
-        platform: "guangya", title: "沙丘 (1984)",
-        shareUrl: "https://www.guangyapan.com/s/1961038051308896266_al17ELaa58LSIYXK",
-        shareCode: "1961038051308896266_al17ELaa58LSIYXK", sharePwd: "", fileCount: 1, sizeBytes: 86517323575,
-      },
-    ]));
-    const snap = await p.search({ keyword: "沙丘" });
-    expect(snap.candidates).toHaveLength(1);
-    expect(snap.candidates[0]!.type).toBe("guangya");
   });
 
   it("drops platforms this product cannot transfer (xunlei/ali/baidu/yidong…)", async () => {

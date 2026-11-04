@@ -7,13 +7,8 @@ import { useRouter } from "../lib/use-router";
 type Session = { token: string; qrcodeContent: string };
 type Phase = "idle" | "loading" | "waiting" | "scanned" | "confirming" | "done" | "expired" | "error";
 
-/** Per-brand wiring for the family CAS scan flow. The two brands share one
- *  protocol; only the API route prefix, the app name to scan with, and the copy
- *  differ. */
-const BRANDS = {
-  quark: { label: "夸克", app: "夸克 App", api: "/api/quark/qrcode" },
-  uc: { label: "UC网盘", app: "UC 浏览器", api: "/api/uc/qrcode" },
-} as const;
+/** Wiring for the 夸克 CAS scan flow. */
+const CONFIG = { label: "夸克", app: "夸克 App", api: "/api/quark/qrcode" } as const;
 
 /** 二维码框下方的状态文案。只有到达这里的三个相位(waiting/scanned/confirming)
  *  会渲染二维码,其余相位走 message 分支。 */
@@ -33,20 +28,16 @@ function buttonIcon(phase: Phase) {
 }
 
 /**
- * 扫码登录(阿里云盘族):生成二维码 → 用户用对应 App 扫 → 每 2s 轮询(非长轮询)
+ * 夸克扫码登录:生成二维码 → 用户用夸克 App 扫 → 每 2s 轮询(非长轮询)
  * → confirmed 拿 service_ticket → /confirm 兑换+绑定。扫码兑换失败时,外层折叠的
  * cookie 粘贴是回退 —— 兑换这一步只有真机扫码才能确认。
- *
- * 外层固定 key={brand}:session/phase/pollLoop 都绑定在某个品牌上,换品牌却沿用
- * 旧状态会让旧二维码继续被轮询、旧 ticket 被拿去兑换别的品牌。当前调用方各品牌用
- * 不同的组件元素因而恰好会重挂,但那是调用方的巧合;key 让这个不变量由组件自己保证。
  */
-export function CloudFamilyQrConnect({ brand }: { brand: keyof typeof BRANDS }) {
-  return <FamilyQrConnectBody key={brand} brand={brand} />;
+export function CloudFamilyQrConnect() {
+  return <FamilyQrConnectBody />;
 }
 
-function FamilyQrConnectBody({ brand }: { brand: keyof typeof BRANDS }) {
-  const config = BRANDS[brand];
+function FamilyQrConnectBody() {
+  const config = CONFIG;
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>("idle");
   const [session, setSession] = useState<Session | null>(null);

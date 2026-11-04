@@ -14,6 +14,12 @@ export function isStagingJanitorId(id: string): boolean {
 }
 
 export type MediaType = "movie" | "tv" | "anime";
+
+/** The four Emby-facing library shelves. Deliberately separate from `MediaType`
+ *  (a TMDB content kind): a 综艺 is a TV series, an animated series is 动漫, and
+ *  an animated film stays 电影. Persisted on MediaTitle so a user override
+ *  survives later genre changes. */
+export type LibraryCategory = "movies" | "tv" | "variety" | "anime";
 export type SeasonStatus = "active" | "completed";
 export type LatestAiredSource = "metadata" | "manual" | "unknown";
 export type AirStatus = "aired" | "unaired" | "unknown";
@@ -53,7 +59,7 @@ export type WorkflowStatus =
    *  releases, but NOT queued/running — the worker never claims it and it is not an
    *  "active" run (see isActiveWorkflowStatus). The air-time gate runs the agent. */
   | "reserved";
-export type ResourceType = "115" | "magnet" | "manual" | "quark" | "uc" | "tianyi" | "123" | "guangya";
+export type ResourceType = "115" | "magnet" | "manual" | "quark";
 export type TransferStatus = "succeeded" | "failed" | "no_target_change";
 export type Confidence = "low" | "medium" | "high";
 
@@ -61,6 +67,9 @@ export interface MediaTitle {
   id: string;
   tmdbId: number;
   type: MediaType;
+  /** Library shelf (电影/电视剧/综艺/动漫). Set from TMDB genres at prepare
+   *  time; a persisted value is authoritative (manual override). */
+  libraryCategory?: LibraryCategory;
   title: string;
   originalTitle: string;
   year: number;
@@ -99,6 +108,9 @@ export interface EpisodeState {
   title: string;
   airStatus: AirStatus;
   obtained: boolean;
+  /** Present in the user's Emby library. Not the same as `obtained`: Emby is a
+   *  separate library, so this never implies a verified file on a connected drive. */
+  availableInEmby?: boolean;
   metadataStatus: MetadataStatus;
   verifiedFileIds: string[];
 }
@@ -326,6 +338,9 @@ export interface NotificationReport {
   lines: string[];
   /** Episodes obtained THIS run (the daily-sweep additions). */
   newlyObtained: string[];
+  /** True only when this run actually landed new files. A patrol no-op or an
+   *  Emby-only skip must NOT trigger downstream automation (SmartStrm). */
+  landed?: boolean;
   /** Aired-but-not-obtained genuine gaps. Never includes unaired episodes. */
   realMissing: string[];
   /** TMDB poster path (e.g. "/abc.jpg"); rendered as an image in rich pushes via
@@ -335,6 +350,8 @@ export interface NotificationReport {
    *  base URL is configured). */
   tmdbId?: number;
   mediaType?: MediaType;
+  /** Four-shelf library category the run landed into (电影/电视剧/综艺/动漫). */
+  libraryCategory?: LibraryCategory;
   /** Movie release year, shown in the title as "标题 (年份)". */
   year?: number;
   /** Optional landing facts, shown when readily available. */
@@ -343,6 +360,8 @@ export interface NotificationReport {
   landingDir?: string;
   /** Short drive labels where files landed during this run (e.g. ["115"] or ["115", "123"]). */
   driveLabels?: string[];
+  /** Connected storage ids that actually received files this run (multi-drive). */
+  landedStorageIds?: string[];
 }
 
 export interface NotificationEvent {

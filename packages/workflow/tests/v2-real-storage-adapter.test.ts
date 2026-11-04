@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { RealStorageV2 } from "../src/acquisition-v2/real-storage-adapter.js";
 import { CandidateRegistry } from "../src/acquisition-v2/candidate-registry.js";
-import { GuangYaAuthError } from "../src/guangya-client.js";
 import { Pan115AuthError } from "../src/pan115-cookie-client.js";
+import { QuarkAuthError } from "../src/quark-cookie-client.js";
 import type { StorageExecutor, UnparsedVideoFile } from "../src/ports.js";
 import type { PackageTreeFile, ResourceCandidate, TransferAttempt, VerifiedFile } from "../src/domain.js";
 
@@ -125,15 +125,10 @@ function adapter(executor: StorageExecutor, registry = new CandidateRegistry(), 
 describe("RealStorageV2.candidateLinkKind — every fail-loud share brand", () => {
   // This gate decides whether transferUntilLanded will accept a candidate at all
   // (SANDBOX_TRANSFER_UNTIL_LANDED_REQUIRES_SHARE_LINK). Forgetting a brand here
-  // silently kills the movie path for it even though the executor can transfer
-  // it — exactly the UC gap caught by review on 2026-10-23.
+  // silently kills the movie path for it even though the executor can transfer it.
   const cases: Array<[string, string]> = [
     ["115", "https://115.com/s/abc"],
     ["quark", "https://pan.quark.cn/s/abc123"],
-    ["uc", "https://drive.uc.cn/s/ad26437c945f4"],
-    ["tianyi", "https://cloud.189.cn/t/abc"],
-    ["123", "https://www.123pan.com/s/abc-def"],
-    ["guangya", "https://guangyapan.com/s/abc"],
   ];
   for (const [label, url] of cases) {
     it(`classifies a ${label} share link as "share"`, () => {
@@ -236,17 +231,11 @@ describe("RealStorageV2 — StorageExecutor → StorageV2 adapter", () => {
     registry.record({ ...candidate("s115"), providerPayload: { url: "https://115cdn.com/s/abc?password=x" } });
     registry.record({ ...candidate("s115b"), providerPayload: { url: "https://115.com/s/def" } });
     registry.record({ ...candidate("squark"), type: "quark", providerPayload: { url: "https://pan.quark.cn/s/zzz?passcode=ab12" } });
-    registry.record({ ...candidate("stianyi"), type: "tianyi", providerPayload: { url: "https://cloud.189.cn/t/QzUnmqBvYr2q?accessCode=x8fd" } });
-    registry.record({ ...candidate("stianyi_web"), type: "tianyi", providerPayload: { url: "https://cloud.189.cn/web/share?code=AbCd12&pwd=1234" } });
-    registry.record({ ...candidate("s123"), type: "123", providerPayload: { url: "https://www.123pan.com/s/abc-1?pwd=x8fd" } });
-    registry.record({ ...candidate("s123_mirror"), type: "123", providerPayload: { url: "https://123684.com/s/Kd9-TvBq?password=1234" } });
-    // 光鸭分享链 fails loud too (201 分享已失效 / GUANGYA_SHARE_EMPTY come back at once).
-    registry.record({ ...candidate("sguangya"), type: "guangya", providerPayload: { url: "https://www.guangyapan.com/s/1947864096514232347_amtV6IXLP9l33m6z" } });
     // silent-fail magnet and unrecognized hosts stay out
     registry.record({ ...candidate("mag"), type: "magnet", providerPayload: { url: "magnet:?xt=urn:btih:deadbeef" } });
     registry.record({ ...candidate("weird"), providerPayload: { url: "https://pan.baidu.com/s/1abcDEF" } });
 
-    for (const id of ["s115", "s115b", "squark", "stianyi", "stianyi_web", "s123", "s123_mirror", "sguangya"]) {
+    for (const id of ["s115", "s115b", "squark"]) {
       expect(storage.candidateLinkKind(id)).toBe("share");
     }
     expect(storage.candidateLinkKind("mag")).toBe("magnet");
@@ -399,7 +388,7 @@ describe("RealStorageV2.transferSubtitleUrls — batch-first, per-file fallback 
       override async transferSubtitleUrl(input: { url: string; filename: string; directoryId: string; workflowRunId: string }) {
         this.subtitleSingleCalls.push(input.filename);
         if (this.subtitleSingleCalls.length >= 2) {
-          throw new GuangYaAuthError("GUANGYA_AUTH_FAILED: token dead");
+          throw new QuarkAuthError("QUARK_AUTH_FAILED: cookie dead");
         }
         return {
           id: `${input.workflowRunId}_subtitle_${this.subtitleSingleCalls.length}`,
@@ -415,12 +404,12 @@ describe("RealStorageV2.transferSubtitleUrls — batch-first, per-file fallback 
     const { storage } = adapter(executor);
 
     await expect(storage.transferSubtitleUrls({ files: files(3), intoDirectoryId: "staging" })).rejects.toBeInstanceOf(
-      GuangYaAuthError,
+      QuarkAuthError,
     );
     expect(executor.subtitleSingleCalls).toHaveLength(2); // no third attempt on a dead token
   });
 
-  it("falls back to the per-file method when the executor has no batch (光鸭 today)", async () => {
+  it("falls back to the per-file method when the executor has no batch", async () => {
     const executor = new RecordingExecutor();
     const { storage } = adapter(executor);
 
@@ -502,33 +491,5 @@ describe("RealStorageV2.transferSubtitleUrls — batch-first, per-file fallback 
     }
     const { storage } = adapter(new NoSubtitles());
     await expect(storage.transferSubtitleUrls({ files: files(1), intoDirectoryId: "staging" })).rejects.toThrow("REAL_STORAGE_NO_SUBTITLE_SUPPORT");
-  });
-});
-
-describe("RealStorageV2 — 光鸭 share dead-links are recorded softly", () => {
-  it("a proven-dead 光鸭 share is recorded with the 14-day soft TTL; a pending timeout is not", async () => {
-    const recorded: Array<Record<string, unknown>> = [];
-    const deadLinkStore = { recordDeadLink: async (input: Record<string, unknown>) => { recorded.push(input); }, listDeadLinkKeys: async () => [] };
-    const { CandidateRegistry } = await import("../src/acquisition-v2/candidate-registry.js");
-    const { RealStorageV2 } = await import("../src/acquisition-v2/real-storage-adapter.js");
-    const { GUANGYA_DEAD_LINK_TTL_MS } = await import("../src/acquisition-v2/dead-links.js");
-    const registry = new CandidateRegistry();
-    const url = "https://www.guangyapan.com/s/1945376531793305622_aeWnPia0Twth-NLu";
-    registry.record({ id: "dead", snapshotId: "s", index: 0, title: "t", type: "guangya", source: "pansou", providerPayload: { url } });
-    registry.record({ id: "slow", snapshotId: "s", index: 1, title: "t", type: "guangya", source: "pansou", providerPayload: { url: `${url}2` } });
-    const outcomes: Record<string, { status: string; providerMessage: string }> = {
-      dead: { status: "failed", providerMessage: "GUANGYA_API_FAILED: /userres/v1/get_share_access_token status=200 msg=分享已失效" },
-      slow: { status: "no_target_change", providerMessage: "GUANGYA_RESTORE_TIMEOUT: 转存任务 t 在 60 次轮询内未完成" },
-    };
-    const executor = {
-      transfer: async ({ candidate }: { candidate: { id: string } }) => ({ id: "a", workflowRunId: "r", candidateId: candidate.id, materializedFileIds: [], ...outcomes[candidate.id]! }),
-      listTree: async () => [],
-    } as never;
-    const storage = new RealStorageV2({ executor, registry, workflowRunId: "r", deadLinkStore: deadLinkStore as never });
-    await storage.transferCandidate({ candidateId: "dead", intoDirectoryId: "d" });
-    await storage.transferCandidate({ candidateId: "slow", intoDirectoryId: "d" });
-    expect(recorded).toEqual([
-      expect.objectContaining({ key: "guangya:1945376531793305622_aeWnPia0Twth-NLu", kind: "guangya", permanent: false, ttlMs: GUANGYA_DEAD_LINK_TTL_MS }),
-    ]);
   });
 });

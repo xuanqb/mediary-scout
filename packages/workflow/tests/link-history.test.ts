@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { linkHistoryByKey, linkHistoryNoteForUrl } from "../src/acquisition-v2/link-history.js";
 import { readTransferFate } from "../src/user-requests.js";
 
-const SHARE = "https://www.123pan.com/s/Ab-cD_12";
-const SAME_SHARE = "https://www.123pan.cn/s/Ab-cD_12?pwd=1234";
-const OTHER = "https://www.123pan.com/s/OtherKey1";
+const SHARE = "https://115.com/s/Ab-cD_12";
+const SAME_SHARE = "https://115cdn.com/s/Ab-cD_12?password=1234";
+const OTHER = "https://115.com/s/OtherKey1";
 
 describe("link history notes", () => {
   it("every recorded transfer thrown away: 文件每次都被丢掉", () => {

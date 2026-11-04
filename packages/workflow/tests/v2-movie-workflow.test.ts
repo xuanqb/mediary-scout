@@ -159,6 +159,7 @@ describe("runMovieAcquisitionV2 — obtained comes from the AGENT'S coverage, ne
 
     expect(result.status).toBe("succeeded");
     expect(result.episodes[0]!.obtained).toBe(true);
+    expect(result.notification.report?.landed).toBe(true);
   });
 
   it("中文字幕软兜底: markObtained({subtitleFallback:true}) flags 可能无中文字幕 in the notification (环太平洋)", async () => {
@@ -354,6 +355,8 @@ describe("runMovieAcquisitionV2 — user request (replace_request run)", () => {
       identified: true,
     });
     expect((await executor.listTree({ directoryId: movieDir })).map((f) => f.providerFileId)).toContain("oldfilm");
+    // Nothing replaced this run → no new file → downstream automation stays quiet.
+    expect(result.notification.report?.landed).toBeUndefined();
   });
 
   it("no user request → no replacement on the result", async () => {
@@ -371,5 +374,32 @@ describe("runMovieAcquisitionV2 — user request (replace_request run)", () => {
     });
     expect(result.replacement).toBeUndefined();
     expect(result.episodes[0]!.obtained).toBe(false);
+  });
+
+  it("already in Emby → skips the agent, flags availableInEmby, never marks obtained", async () => {
+    let modelCalled = false;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        modelCalled = true;
+        throw new Error("model must not run for a film Emby already has");
+      },
+    });
+    const result = await runMovieAcquisitionV2({
+      title,
+      resourceProvider: emptyProvider(),
+      storage: new FakeStorageExecutor(),
+      model,
+      workflowRunId: "run-m-emby",
+      moviesParentDirectoryId: "movies_root",
+      alreadyInEmby: true,
+      now: () => "2026-11-04T08:00:00.000Z",
+    });
+
+    expect(modelCalled).toBe(false);
+    expect(result.status).toBe("succeeded");
+    expect(result.episodes[0]).toMatchObject({ obtained: false, availableInEmby: true });
+    expect(result.notification.report?.lines).toEqual(["Emby 已有，跳过获取"]);
+    // Emby-only skip wrote nothing → must not trigger SmartStrm.
+    expect(result.notification.report?.landed).toBeUndefined();
   });
 });

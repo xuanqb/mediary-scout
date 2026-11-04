@@ -1,14 +1,10 @@
 # Agent API：让编程 agent 直接操作巡影
 
-桌面版和 Docker 实例都提供一组本地 HTTP 接口，Claude Code、Codex、opencode 这类编程 agent 可以不打开网页就操作巡影：改设置、发起获取、看进度。
+Docker 实例提供一组本地 HTTP 接口，Claude Code、Codex、opencode 这类编程 agent 可以不打开网页就操作巡影：改设置、发起获取、看进度。
 
 开了多用户的实例里，这组接口操作的都是站主账号（第一个注册的那个）；「立即巡检」会把所有账号都巡检一遍。其他成员要操作自己的库，用网页。
 
 ## 开启
-
-**桌面版**：自动开启。第一次启动时会生成 token，并把地址和 token 写到 `~/.mediary/agent.json`，skill 就从这个文件读。
-
-**Docker**：
 
 1. 生成一个随机 token：`openssl rand -hex 32`。这个 token 能改设置、发起获取，别用短的或好猜的。
 2. 写进部署目录的 `.env`：`MEDIA_TRACK_AGENT_TOKEN=<上一步的输出>`，然后在部署目录运行 `docker compose up -d`。
@@ -22,7 +18,7 @@ chmod 600 ~/.mediary/agent.json
 
 ## 装上 skill
 
-skill 在本仓库的 `skills/mediary-scout` 里。桌面版用户手上没有仓库，先拉一份：
+skill 在本仓库的 `skills/mediary-scout` 里。先拉一份：
 
 ```bash
 git clone --depth 1 https://github.com/fancydirty/mediary-scout /tmp/mediary-scout

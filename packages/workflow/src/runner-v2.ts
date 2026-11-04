@@ -38,6 +38,8 @@ import { formatReportPushText, stampReplaceNotification } from "./notification-r
 interface TvV2Common {
   title: MediaTitle;
   categoryParentId: string;
+  /** Episode codes already present in Emby — skipped by search, never marked obtained. */
+  embyAvailableEpisodes?: string[];
   resourceProvider: ResourceProvider;
   storage: StorageExecutor;
   model: LanguageModel;
@@ -538,6 +540,7 @@ function appendMultiDriveBreakdownToNotifications(
     touched.map((d) => [d.storageId, shortDriveLabel(d.label)]),
   );
   const driveLabels = [...new Set(drivesWithFiles.map((d) => shortDriveLabel(d.label)))];
+  const landedStorageIds = [...new Set(drivesWithFiles.map((d) => d.storageId))];
   const countByStorage = new Map<string, Set<string>>();
   for (const c of copies) {
     let set = countByStorage.get(c.storageId);
@@ -561,6 +564,7 @@ function appendMultiDriveBreakdownToNotifications(
     const nextReport = {
       ...n.report,
       ...(driveLabels.length > 0 ? { driveLabels } : {}),
+      ...(landedStorageIds.length > 0 ? { landedStorageIds } : {}),
       ...(breakdownLine ? { lines: [...n.report.lines, breakdownLine] } : {}),
     };
     return {
@@ -651,6 +655,9 @@ export async function runType2InitializationV2AndPersist(
       },
     ],
     categoryParentId: input.categoryParentId,
+    ...(input.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: input.embyAvailableEpisodes }),
     resourceProvider: input.resourceProvider,
     storage: input.storage,
     deadLinkStore: input.repository,
@@ -700,6 +707,9 @@ export async function runType3MonitoringV2AndPersist(
       },
     ],
     categoryParentId: input.categoryParentId,
+    ...(input.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: input.embyAvailableEpisodes }),
     resourceProvider: input.resourceProvider,
     storage: input.storage,
     deadLinkStore: input.repository,
@@ -751,6 +761,9 @@ export async function runSeriesInitializationV2AndPersist(
       qualityPreference: quality,
     })),
     categoryParentId: input.categoryParentId,
+    ...(input.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: input.embyAvailableEpisodes }),
     resourceProvider: input.resourceProvider,
     storage: input.storage,
     deadLinkStore: input.repository,
@@ -900,6 +913,9 @@ export async function runReplaceRequestV2AndPersist(
       status: season.status,
     })),
     categoryParentId: input.categoryParentId,
+    ...(input.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: input.embyAvailableEpisodes }),
     resourceProvider: input.resourceProvider,
     storage: input.storage,
     deadLinkStore: input.repository,
@@ -1066,6 +1082,9 @@ export async function runStagingRecoveryV2AndPersist(
       status: season.status,
     })),
     categoryParentId: input.categoryParentId,
+    ...(input.embyAvailableEpisodes === undefined
+      ? {}
+      : { embyAvailableEpisodes: input.embyAvailableEpisodes }),
     resourceProvider: input.resourceProvider,
     storage: input.storage,
     deadLinkStore: input.repository,
@@ -1262,6 +1281,8 @@ export async function runMovieAcquisitionV2AndPersist(input: {
   userRequest?: RunMovieAcquisitionV2Request["userRequest"];
   /** Replace runs: whether the film was obtained before (see RunMovieAcquisitionV2Request). */
   priorObtained?: boolean;
+  /** The film is already in Emby → skip search (see RunMovieAcquisitionV2Request). */
+  alreadyInEmby?: boolean;
   /** How the notification is pushed (see stampReplaceNotification): replace runs, and
    *  the patrol's film runs (scheduled, into the daily digest). */
   notice?: ReplaceNotice;
@@ -1295,6 +1316,7 @@ export async function runMovieAcquisitionV2AndPersist(input: {
     ...(input.jevJudge === undefined ? {} : { jevJudge: input.jevJudge }),
     ...(input.userRequest === undefined ? {} : { userRequest: input.userRequest }),
     ...(input.priorObtained === undefined ? {} : { priorObtained: input.priorObtained }),
+    ...(input.alreadyInEmby === undefined ? {} : { alreadyInEmby: input.alreadyInEmby }),
     ...(await protectExistingOption(input)),
     ...rejectedLookupOption(input),
     ...linkHistoryOption({ ...input, workflowRunId: input.workflowRun.id, now }),
@@ -1335,6 +1357,8 @@ export async function runMovieAcquisitionV2AndPersist(input: {
     obtainedMovie.length > 0
       ? (result.touchedTargetDrives ?? []).map((d) => shortDriveLabel(d.label))
       : [];
+  const movieStorageIds =
+    obtainedMovie.length > 0 ? [...new Set((result.touchedTargetDrives ?? []).map((d) => d.storageId))] : [];
   const movieNotifications = stampNotifications(result.notifications, input.notice).map((n) => {
     if (!n.report || movieDriveLabels.length === 0) return n;
     return {
@@ -1342,6 +1366,7 @@ export async function runMovieAcquisitionV2AndPersist(input: {
       report: {
         ...n.report,
         driveLabels: [...new Set(movieDriveLabels)],
+        ...(movieStorageIds.length > 0 ? { landedStorageIds: movieStorageIds } : {}),
       },
     };
   });

@@ -15,6 +15,7 @@ import {
   type WorkflowStatus,
 } from "../domain.js";
 import { buildReplacementReport, buildSeasonReport, buildSeriesReport, formatReportPushText } from "../notification-report.js";
+import { libraryCategoryOf } from "../media-classification.js";
 import { classifyTransferBlock } from "./transfer-block.js";
 import { classifySearchSourceFault } from "./search-source-fault.js";
 import type { RunAcquisitionV2WorkflowResult } from "./workflow-v2.js";
@@ -88,10 +89,11 @@ export function bridgeV2WorkflowToResult(input: {
   const { title, v2, workflowRunId } = input;
   const obtainedSet = new Set(v2.obtained);
   const providerAheadSet = new Set(v2.providerAhead);
+  const embySet = new Set(v2.embyAvailable ?? []);
   const stillMissingSet = new Set(v2.stillMissing);
 
   const seasons: BridgedSeasonResult[] = input.seasons.map((intent) =>
-    bridgeSeason({ title, intent, v2, obtainedSet, providerAheadSet }),
+    bridgeSeason({ title, intent, v2, obtainedSet, providerAheadSet, embySet }),
   );
 
   const status = resolveStatus({ missingBefore: v2.missingBefore, stillMissing: v2.stillMissing });
@@ -150,8 +152,9 @@ function bridgeSeason(input: {
   v2: RunAcquisitionV2WorkflowResult;
   obtainedSet: Set<string>;
   providerAheadSet: Set<string>;
+  embySet: Set<string>;
 }): BridgedSeasonResult {
-  const { title, intent, v2, obtainedSet, providerAheadSet } = input;
+  const { title, intent, v2, obtainedSet, providerAheadSet, embySet } = input;
   const trackedSeasonId = `${title.id}_s${intent.seasonNumber}`;
 
   const base = createEpisodeStates({
@@ -163,13 +166,19 @@ function bridgeSeason(input: {
   const episodes: EpisodeState[] = base.map((episode) => {
     const ahead = providerAheadSet.has(episode.episodeCode);
     const obtained = obtainedSet.has(episode.episodeCode) || ahead;
-    if (!obtained) {
+    const inEmby = embySet.has(episode.episodeCode);
+    if (!obtained && !inEmby) {
       return episode;
     }
     return {
       ...episode,
-      obtained: true,
-      ...(ahead ? { metadataStatus: "provider_ahead" as const } : {}),
+      ...(inEmby ? { availableInEmby: true } : {}),
+      ...(obtained
+        ? {
+            obtained: true,
+            ...(ahead ? { metadataStatus: "provider_ahead" as const } : {}),
+          }
+        : {}),
     };
   });
 
@@ -259,7 +268,16 @@ function buildNotification(input: {
 }): NotificationEvent {
   const { title, mode, seasons, status, workflowRunId } = input;
   const noCoverage = status === "no_coverage";
-  const titleMeta = { posterPath: title.posterPath ?? null, tmdbId: title.tmdbId, mediaType: title.type, year: title.year };
+  const landed =
+    input.newlyObtainedCodes.length > 0 ||
+    (input.replacementResults ?? []).some((result) => result.outcome === "replaced");
+  const titleMeta = {
+    posterPath: title.posterPath ?? null,
+    tmdbId: title.tmdbId,
+    mediaType: title.type,
+    libraryCategory: libraryCategoryOf(title),
+    year: title.year,
+  };
 
   if (mode === "replace") {
     const report = buildReplacementReport({
@@ -279,7 +297,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report,
+      report: landed ? { ...report, landed: true } : report,
     };
   }
 
@@ -303,7 +321,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report,
+      report: landed ? { ...report, landed: true } : report,
     };
   }
 
@@ -347,7 +365,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "scheduled",
-      report,
+      report: landed ? { ...report, landed: true } : report,
     };
   }
 
@@ -359,6 +377,6 @@ function buildNotification(input: {
     body: formatReportPushText(report),
     createdAt: input.now(),
     trigger: "user",
-    report,
+    report: landed ? { ...report, landed: true } : report,
   };
 }

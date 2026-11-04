@@ -86,18 +86,8 @@ describe("languageLine — 中字软默认按品牌注册表解耦 (Task 4)", ()
     }
   });
 
-  it("guangya does NOT apply the strengthened Chinese-subs default", () => {
-    const p = buildTvAnimeSystemPrompt({
-      preferredLanguage: "中文",
-      originCountries: ["US"],
-      storageProvider: "guangya",
-    });
-    // Should NOT contain the 115/quark-specific strengthening
-    expect(p).not.toMatch(/中文世界|中文圈.*更应默认/);
-  });
-
   it("CN-origin content still skips 中字 judgment regardless of provider (regression check)", () => {
-    for (const provider of ["pan115", "quark", "guangya"]) {
+    for (const provider of ["pan115", "quark"]) {
       const p = buildTvAnimeSystemPrompt({
         preferredLanguage: "中文",
         originCountries: ["CN"],

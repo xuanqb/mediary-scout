@@ -8,17 +8,15 @@ import {
 } from "./settings-attention";
 
 const brandLabel = (provider: string) =>
-  ({ pan115: "115网盘", quark: "夸克网盘", guangya: "光鸭云盘" }[provider] ?? provider);
+  ({ pan115: "115网盘", quark: "夸克网盘" }[provider] ?? provider);
 
 describe("buildSettingsAttentionItems", () => {
   it("returns empty in demo mode even with problems", () => {
     const items = buildSettingsAttentionItems({
       demo: true,
-      isOwner: true,
       drives: [{ id: "cs1", provider: "quark", label: null, status: "frozen" }],
       brandLabel,
       llmConfigured: false,
-      availableUpdate: { tag: "v2026.10.02", commit: "b".repeat(40), currentLabel: "v2026.09.28" },
     });
     expect(items).toEqual([]);
   });
@@ -26,14 +24,12 @@ describe("buildSettingsAttentionItems", () => {
   it("lists frozen drives as blockers with plain labels", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [
         { id: "cs_q", provider: "quark", label: null, status: "frozen" },
         { id: "cs_a", provider: "pan115", label: "家里115", status: "active" },
       ],
       brandLabel,
       llmConfigured: true,
-      availableUpdate: null,
     });
     expect(items).toEqual([
       expect.objectContaining({
@@ -50,11 +46,9 @@ describe("buildSettingsAttentionItems", () => {
   it("flags missing LLM config as a warning", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [],
       brandLabel,
       llmConfigured: false,
-      availableUpdate: null,
     });
     expect(items.map((i) => i.kind)).toEqual(["missing_llm"]);
     expect(items[0]?.severity).toBe("warning");
@@ -66,11 +60,9 @@ describe("buildSettingsAttentionItems", () => {
   it("warns when the custom search source is unreachable", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [],
       brandLabel,
       llmConfigured: true,
-      availableUpdate: null,
       searchSource: { custom: true, reachable: false },
     });
     expect(items.map((i) => i.kind)).toEqual(["search_source_unreachable"]);
@@ -83,11 +75,9 @@ describe("buildSettingsAttentionItems", () => {
   it("stays quiet when the custom search source is reachable", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [],
       brandLabel,
       llmConfigured: true,
-      availableUpdate: null,
       searchSource: { custom: true, reachable: true },
     });
     expect(items).toEqual([]);
@@ -96,11 +86,9 @@ describe("buildSettingsAttentionItems", () => {
   it("stays quiet when there is no custom search source (nothing for the user to fix)", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [],
       brandLabel,
       llmConfigured: true,
-      availableUpdate: null,
       searchSource: { custom: false, reachable: false },
     });
     expect(items).toEqual([]);
@@ -111,77 +99,40 @@ describe("buildSettingsAttentionItems", () => {
     expect(isAttentionItemId("search_source_unreachable")).toBe(true);
   });
 
-  it("offers the newer release and links to the update tab (owner only), release-scoped id", () => {
-    const items = buildSettingsAttentionItems({
-      demo: false,
-      isOwner: true,
-      drives: [],
-      brandLabel,
-      llmConfigured: true,
-      availableUpdate: { tag: "v2026.10.02", commit: "c".repeat(40), currentLabel: "v2026.09.28" },
-    });
-    const item = items.find((entry) => entry.kind === "update_available");
-    // Release-scoped id (7 hex of the commit): a newer release gets a new id → reappears after dismiss.
-    expect(item).toMatchObject({ id: "update:ccccccc", severity: "info", title: "有新版本可用", actionLabel: "去更新" });
-    expect(item?.href).toContain("tab=update");
-    expect(item).not.toHaveProperty("prompt");
-    // Desktop downloads an installer and an old compose file has no updater yet: the text
-    // must not promise a one-click update the tab may not offer.
-    expect(item?.body).toBe("当前 v2026.09.28 · 新版本 v2026.10.02。去「更新」看看改了什么。");
-  });
-
-  it("shows no update item to a non-owner or when nothing newer exists", () => {
-    const update = { tag: "v2026.10.02", commit: "c".repeat(40), currentLabel: "v2026.09.28" };
-    const hasUpdate = (items: Array<{ kind: string }>) => items.some((item) => item.kind === "update_available");
-    expect(hasUpdate(buildSettingsAttentionItems({ demo: false, isOwner: false, drives: [], brandLabel, llmConfigured: true, availableUpdate: update }))).toBe(false);
-    expect(hasUpdate(buildSettingsAttentionItems({ demo: false, isOwner: true, drives: [], brandLabel, llmConfigured: true, availableUpdate: null }))).toBe(false);
-  });
-
-  it("hides update_available from non-owners (multi-user) but keeps per-account items", () => {
-    const items = buildSettingsAttentionItems({
-      demo: false,
-      isOwner: false,
-      drives: [{ id: "cs_q", provider: "quark", label: null, status: "frozen" }],
-      brandLabel,
-      llmConfigured: false,
-      availableUpdate: { tag: "v2026.10.02", commit: "b".repeat(40), currentLabel: "v2026.09.28" },
-    });
-    expect(items.map((i) => i.kind).sort()).toEqual(["frozen_drive", "missing_llm"]);
-    expect(items.some((i) => i.kind === "update_available")).toBe(false);
-  });
-
   it("aggregates severity: blocker > warning > info", () => {
     const base = {
       demo: false,
-      isOwner: true,
       drives: [] as Array<{ id: string; provider: string; label: string | null; status: "active" | "frozen" }>,
       brandLabel,
       llmConfigured: true,
-      availableUpdate: null,
     };
-    const updateOnly = summarizeSettingsAttention(
-      buildSettingsAttentionItems({
-        ...base,
-        availableUpdate: { tag: "v2026.10.02", commit: "2".repeat(40), currentLabel: "v2026.09.28" },
-      }),
-    );
-    expect(updateOnly).toMatchObject({ count: 1, severity: "info" });
+    const infoOnly = summarizeSettingsAttention([
+      {
+        id: "search_source_unreachable",
+        kind: "search_source_unreachable",
+        severity: "info",
+        title: "",
+        body: "",
+        actionLabel: "",
+        href: "",
+      },
+    ]);
+    expect(infoOnly).toMatchObject({ count: 1, severity: "info" });
 
     const warningOnly = summarizeSettingsAttention(
       buildSettingsAttentionItems({ ...base, llmConfigured: false }),
     );
     expect(warningOnly).toMatchObject({ count: 1, severity: "warning" });
 
-    const all = summarizeSettingsAttention(
+    const blocker = summarizeSettingsAttention(
       buildSettingsAttentionItems({
         ...base,
         drives: [{ id: "cs1", provider: "quark", label: null, status: "frozen" }],
         llmConfigured: false,
-        availableUpdate: { tag: "v2026.10.02", commit: "2".repeat(40), currentLabel: "v2026.09.28" },
       }),
     );
-    expect(all.count).toBe(3);
-    expect(all.severity).toBe("blocker");
+    expect(blocker.count).toBe(2);
+    expect(blocker.severity).toBe("blocker");
 
     expect(summarizeSettingsAttention([])).toEqual({ count: 0, severity: null, items: [] });
   });
@@ -189,11 +140,9 @@ describe("buildSettingsAttentionItems", () => {
   it("preserves non-primary workspace on deep-links", () => {
     const items = buildSettingsAttentionItems({
       demo: false,
-      isOwner: true,
       drives: [{ id: "cs_q", provider: "quark", label: null, status: "frozen" }],
       brandLabel,
       llmConfigured: false,
-      availableUpdate: null,
       activeStorageId: "cs_other",
     });
     expect(items.map((i) => i.href)).toEqual([
@@ -208,8 +157,8 @@ describe("parseAttentionTimeMap", () => {
     const map = parseAttentionTimeMap(
       JSON.stringify({
         "frozen:cs1": "2026-07-01T00:00:00.000Z",
-        "update:aaaaaaa": "not-a-date",
-        "missing_llm": 42,
+        search_source_unreachable: "not-a-date",
+        missing_llm: 42,
         ["x".repeat(200)]: "2026-07-01T00:00:00.000Z",
       }),
     );
@@ -253,24 +202,22 @@ describe("parseAttentionTimeMap prototype keys", () => {
     expect(Object.keys(parseAttentionTimeMap(raw)).sort()).toEqual([
       "frozen:cs_1",
       "missing_llm",
-      "update:1234abc",
     ]);
   });
 });
 
 describe("isAttentionItemId", () => {
-  it("accepts the three known id shapes", () => {
+  it("accepts the known id shapes", () => {
     expect(isAttentionItemId("missing_llm")).toBe(true);
+    expect(isAttentionItemId("search_source_unreachable")).toBe(true);
     expect(isAttentionItemId("frozen:cs_abc123")).toBe(true);
-    expect(isAttentionItemId("update:aaaaaaa")).toBe(true);
-    expect(isAttentionItemId("update:0123456789abcdef0123456789abcdef01234567")).toBe(true);
   });
 
   it("rejects everything else (bounded write surface)", () => {
     expect(isAttentionItemId("")).toBe(false);
     expect(isAttentionItemId("update_available")).toBe(false);
+    expect(isAttentionItemId("update:aaaaaaa")).toBe(false);
     expect(isAttentionItemId("frozen:")).toBe(false);
-    expect(isAttentionItemId("update:zzz")).toBe(false);
     expect(isAttentionItemId("../etc/passwd")).toBe(false);
     expect(isAttentionItemId(`frozen:${"x".repeat(65)}`)).toBe(false);
   });
@@ -279,12 +226,10 @@ describe("isAttentionItemId", () => {
 describe("applySettingsAttentionState", () => {
   const baseItems = buildSettingsAttentionItems({
     demo: false,
-    isOwner: true,
     drives: [{ id: "cs1", provider: "quark", label: null, status: "frozen" }],
     brandLabel,
     llmConfigured: false,
-    availableUpdate: { tag: "v2026.10.02", commit: "2".repeat(40), currentLabel: "v2026.09.28" },
-  }); // frozen:cs1 (blocker) + missing_llm (warning) + update:2222222 (info)
+  }); // frozen:cs1 (blocker) + missing_llm (warning)
 
   const T0 = "2026-07-01T00:00:00.000Z";
   const T1 = "2026-07-02T00:00:00.000Z";
@@ -295,25 +240,25 @@ describe("applySettingsAttentionState", () => {
       items: baseItems, stateSince: {}, dismissed: {}, seenAt: null, now: T1,
     });
     expect(r.items.map((i) => [i.id, i.createdAt])).toEqual([
-      ["frozen:cs1", T1], ["missing_llm", T1], ["update:2222222", T1],
+      ["frozen:cs1", T1], ["missing_llm", T1],
     ]);
-    expect(r.nextStateSince).toEqual({ "frozen:cs1": T1, missing_llm: T1, "update:2222222": T1 });
+    expect(r.nextStateSince).toEqual({ "frozen:cs1": T1, missing_llm: T1 });
     expect(r.stateSinceChanged).toBe(true);
-    expect(r.count).toBe(3);
+    expect(r.count).toBe(2);
     expect(r.severity).toBe("blocker");
   });
 
   it("keeps existing state_since timestamps (createdAt = first sight, not last render)", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T0, missing_llm: T0, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T0, missing_llm: T0 },
       dismissed: {}, seenAt: null, now: T1,
     });
     expect(r.items.every((i) => i.createdAt === T0)).toBe(true);
     expect(r.stateSinceChanged).toBe(false);
   });
 
-  it("drops state_since entries whose state ended (drive unfroze / llm configured / update applied)", () => {
+  it("drops state_since entries whose state ended (drive unfroze / llm configured)", () => {
     const r = applySettingsAttentionState({
       items: baseItems.filter((i) => i.id === "missing_llm"),
       stateSince: { "frozen:cs1": T0, missing_llm: T0 },
@@ -339,10 +284,10 @@ describe("applySettingsAttentionState", () => {
   it("badge count = visible items created AFTER seen_at; seen items stay in the inbox", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T0, missing_llm: T2, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T0, missing_llm: T2 },
       dismissed: {}, seenAt: T1, now: T2,
     });
-    expect(r.items).toHaveLength(3); // inbox unchanged by seen
+    expect(r.items).toHaveLength(2); // inbox unchanged by seen
     expect(r.count).toBe(1); // only missing_llm (T2 > T1)
     expect(r.severity).toBe("warning");
   });
@@ -350,35 +295,35 @@ describe("applySettingsAttentionState", () => {
   it("dismissal hides the item from inbox + count while its occurrence continues", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T0, missing_llm: T0, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T0, missing_llm: T0 },
       dismissed: { "frozen:cs1": T1 }, // dismissed AFTER the occurrence began
       seenAt: null, now: T2,
     });
-    expect(r.items.map((i) => i.id)).toEqual(["missing_llm", "update:2222222"]);
-    expect(r.count).toBe(2);
+    expect(r.items.map((i) => i.id)).toEqual(["missing_llm"]);
+    expect(r.count).toBe(1);
   });
 
   it("dismissal does NOT hide a NEW occurrence (state ended → fresh state_since > dismissedAt)", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
       // re-freeze at T2, dismissal of the previous occurrence was at T1
-      stateSince: { "frozen:cs1": T2, missing_llm: T0, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T2, missing_llm: T0 },
       dismissed: { "frozen:cs1": T1 },
       seenAt: null, now: T2,
     });
     expect(r.items.map((i) => i.id)).toContain("frozen:cs1");
-    expect(r.count).toBe(3);
+    expect(r.count).toBe(2);
   });
 
-  it("severity is the worst among counted items only (dismissed/seen don't tint the badge)", () => {
+  it("severity is the worst among counted items only (dismissed items don't tint the badge)", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T0, missing_llm: T0, "update:2222222": T2 },
-      dismissed: { "frozen:cs1": T1, missing_llm: T1 },
+      stateSince: { "frozen:cs1": T0, missing_llm: T0 },
+      dismissed: { "frozen:cs1": T1 }, // blocker dismissed, warning remains
       seenAt: null, now: T2,
     });
     expect(r.count).toBe(1);
-    expect(r.severity).toBe("info");
+    expect(r.severity).toBe("warning");
   });
 
   // 时间必须按「瞬时」比较，不能按字符串字典序。parseAttentionTimeMap 的
@@ -390,12 +335,12 @@ describe("applySettingsAttentionState", () => {
   it("dismissal with a timezone-offset timestamp still hides the ongoing occurrence", () => {
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T1, missing_llm: T0, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T1, missing_llm: T0 },
       dismissed: { "frozen:cs1": T1_MINUS5 }, // 实际晚于 createdAt=T1 → 应隐藏
       seenAt: null, now: T2,
     });
     expect(r.items.map((i) => i.id)).not.toContain("frozen:cs1");
-    expect(r.count).toBe(2);
+    expect(r.count).toBe(1);
   });
 
   it("an unparseable seen_at counts everything (never silently zeroes the badge)", () => {
@@ -403,11 +348,11 @@ describe("applySettingsAttentionState", () => {
     // 若不归一化，一个坏 seen_at 会让徽章整体消失（提醒系统最不能犯的错）。
     const r = applySettingsAttentionState({
       items: baseItems,
-      stateSince: { "frozen:cs1": T0, missing_llm: T0, "update:2222222": T0 },
+      stateSince: { "frozen:cs1": T0, missing_llm: T0 },
       dismissed: {},
       seenAt: "not-a-date", now: T2,
     });
-    expect(r.count).toBe(3);
+    expect(r.count).toBe(2);
     expect(r.severity).toBe("blocker");
   });
 

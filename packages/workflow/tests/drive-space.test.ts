@@ -3,19 +3,15 @@ import {
   FakeResourceProvider,
   FakeStorageExecutor,
   formatDriveSpaceSummary,
-  GuangYaClient,
   InMemoryWorkflowRepository,
   Pan115CookieClient,
-  Pan123Client,
   QuarkCookieClient,
   resolveWorkerDeps,
   sortDrivesByOrder,
-  TianyiClient,
-  UC_PROFILE,
   type AcquisitionDriveContext,
 } from "../src/index.js";
 
-describe("drive space querying across all six brands + cache + summary formatting", () => {
+describe("drive space querying + cache + summary formatting", () => {
   it("Pan115CookieClient.getSpace parses /user/space all_total.size and all_use.size", async () => {
     let calledUrl = "";
     const client = new Pan115CookieClient({
@@ -40,7 +36,7 @@ describe("drive space querying across all six brands + cache + summary formattin
     });
   });
 
-  it("QuarkCookieClient.getSpace parses /1/clouddrive/member for both 夸克 (over-quota) and UC", async () => {
+  it("QuarkCookieClient.getSpace parses /1/clouddrive/member (over-quota)", async () => {
     const quarkClient = new QuarkCookieClient({
       cookie: "__uid=u1; __pus=p1",
       fetchJson: async () => ({
@@ -58,111 +54,6 @@ describe("drive space querying across all six brands + cache + summary formattin
       usedBytes: 1479851127848,
     });
     expect(quarkSpace!.totalBytes - quarkSpace!.usedBytes).toBeLessThan(0);
-
-    let ucUrl = "";
-    const ucClient = new QuarkCookieClient({
-      cookie: "__uid=u2; __pus=p2",
-      profile: UC_PROFILE,
-      fetchJson: async (url) => {
-        ucUrl = url;
-        return {
-          status: 200,
-          code: 0,
-          data: {
-            total_capacity: 6597069766656,
-            use_capacity: 660807580105,
-          },
-        };
-      },
-    });
-    const ucSpace = await ucClient.getSpace();
-    expect(ucUrl).toContain("https://pc-api.uc.cn/1/clouddrive/member?pr=UCBrowser");
-    expect(ucSpace).toEqual({
-      totalBytes: 6597069766656,
-      usedBytes: 660807580105,
-    });
-  });
-
-  it("GuangYaClient.getSpace posts to /assets/v1/get_assets", async () => {
-    let calledUrl = "";
-    const client = new GuangYaClient({
-      accessToken: "at",
-      refreshToken: "rt",
-      deviceId: "did1",
-      fetchImpl: (async (url: string) => {
-        calledUrl = url;
-        return new Response(
-          JSON.stringify({
-            code: 0,
-            msg: "success",
-            data: {
-              totalSpaceSize: 549755813888000,
-              usedSpaceSize: 762947115439,
-            },
-          }),
-          { status: 200 },
-        );
-      }) as typeof fetch,
-    });
-    const space = await client.getSpace();
-    expect(calledUrl).toBe("https://api.guangyapan.com/assets/v1/get_assets");
-    expect(space).toEqual({
-      totalBytes: 549755813888000,
-      usedBytes: 762947115439,
-    });
-  });
-
-  it("Pan123Client.getSpace queries signed /b/api/user/info", async () => {
-    let calledUrl = "";
-    const client = new Pan123Client({
-      token: "tok",
-      fetchImpl: async (url) => {
-        calledUrl = url;
-        return {
-          status: 200,
-          text: JSON.stringify({
-            code: 0,
-            message: "ok",
-            data: {
-              SpacePermanent: 23708219473920,
-              SpaceUsed: 2184282204627,
-            },
-          }),
-        };
-      },
-    });
-    const space = await client.getSpace();
-    expect(calledUrl).toContain("https://yun.123pan.com/b/api/user/info?");
-    expect(space).toEqual({
-      totalBytes: 23708219473920,
-      usedBytes: 2184282204627,
-    });
-  });
-
-  it("TianyiClient.getSpace queries /api/open/user/getUserInfo.action and preserves negative available space", async () => {
-    let calledUrl = "";
-    const client = new TianyiClient({
-      sessionKey: "sk",
-      accessToken: "at",
-      refreshToken: "rt",
-      fetchImpl: async (url) => {
-        calledUrl = url;
-        return {
-          status: 200,
-          text: JSON.stringify({
-            res_code: 0,
-            capacity: 32212254720,
-            available: -44152877229,
-          }),
-        };
-      },
-    });
-    const space = await client.getSpace();
-    expect(calledUrl).toContain("https://cloud.189.cn/api/open/user/getUserInfo.action?");
-    expect(space).toEqual({
-      totalBytes: 32212254720,
-      usedBytes: 32212254720 - -44152877229,
-    });
   });
 
   it("formatDriveSpaceSummary formats normal, over-quota (negative remaining), and unknown states", () => {
@@ -245,20 +136,17 @@ describe("drive space querying across all six brands + cache + summary formattin
     const drives = [
       { id: "cs_115", createdAt: "2026-06-01T00:00:00.000Z" },
       { id: "cs_quark", createdAt: "2026-06-02T00:00:00.000Z" },
-      { id: "cs_123", createdAt: "2026-06-03T00:00:00.000Z" },
-      { id: "cs_uc", createdAt: "2026-06-04T00:00:00.000Z" },
+      { id: "cs_quark2", createdAt: "2026-06-03T00:00:00.000Z" },
     ];
-    expect(sortDrivesByOrder(drives, ["cs_123", "cs_115"]).map((d) => d.id)).toEqual([
-      "cs_123",
+    expect(sortDrivesByOrder(drives, ["cs_quark2", "cs_115"]).map((d) => d.id)).toEqual([
+      "cs_quark2",
       "cs_115",
       "cs_quark",
-      "cs_uc",
     ]);
     expect(sortDrivesByOrder(drives, []).map((d) => d.id)).toEqual([
       "cs_115",
       "cs_quark",
-      "cs_123",
-      "cs_uc",
+      "cs_quark2",
     ]);
   });
 
@@ -271,15 +159,15 @@ describe("drive space querying across all six brands + cache + summary formattin
         provider: "pan115",
         label: "115 网盘",
         storage: fakeExec,
-        parents: { tv: "tv_115", anime: "anime_115", movies: "mov_115" },
+        parents: { tv: "tv_115", anime: "anime_115", movies: "mov_115", variety: "var_115" },
         space: { totalBytes: 40 * 1024 ** 4, usedBytes: 19 * 1024 ** 4 },
       },
       {
-        storageId: "cs_123",
-        provider: "pan123",
-        label: "123网盘",
+        storageId: "cs_quark",
+        provider: "quark",
+        label: "夸克网盘",
         storage: fakeExec,
-        parents: { tv: "tv_123", anime: "anime_123", movies: "mov_123" },
+        parents: { tv: "tv_quark", anime: "anime_quark", movies: "mov_quark", variety: "var_quark" },
         space: { totalBytes: 20 * 1024 ** 4, usedBytes: 2 * 1024 ** 4 },
       },
     ];

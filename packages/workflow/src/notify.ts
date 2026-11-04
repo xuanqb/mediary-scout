@@ -14,7 +14,7 @@ export function driveDisplayName(drive: { provider: string; label: string | null
 
 /** Statuses that represent real files in the library (mirrors `apps/web/app/notifications/page.tsx`).
  *  A `no_coverage` / `failed` / `retrying` report landed nothing, so stamping a drive name on it
- *  (e.g. "来源网盘：天翼云盘" when the agent searched both Tianyi and Quark and found nothing)
+ *  (e.g. "来源网盘：夸克网盘" when the agent searched both 115 and 夸克 and found nothing)
  *  misleads the user into thinking only that one drive was searched (issue #359). */
 const LANDED_REPORT_STATUSES = new Set(["acquired", "complete", "airing", "partial", "replaced"]);
 

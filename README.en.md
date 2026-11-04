@@ -19,9 +19,7 @@
   <a href="README.md">中文</a>
 </p>
 
-Ask for a movie, show or anime; an agent searches for it, transfers the best match into your own drive (Quark / UC / 115 / GuangYaPan / 123 / Tianyi), reads the drive back to confirm it landed, and keeps filling in episodes that are still missing.
-
-Download: [GitHub Releases](https://github.com/fancydirty/mediary-scout/releases/latest) (macOS / Windows desktop app)
+Ask for a movie, show or anime; an agent searches for it, transfers the best match into your own drive (115 / Quark), reads the drive back to confirm it landed, and keeps filling in episodes that are still missing. Episodes and films already in Emby are not searched again; after landing, SmartStrm can be told to generate `.strm` files.
 
 Support the author: [buy me a coffee](docs/support/README.md)
 
@@ -29,47 +27,29 @@ Community: this project takes part in and endorses the [LINUX DO community](http
 
 ![Mediary Scout: search a title, hit 获取, and the agent searches, transfers, and verifies it into your drive](docs/images/demo.gif)
 
-## Install
-
-### Desktop app (easiest)
-
-| Platform | Download | Notes |
-|---|---|---|
-| macOS (Apple Silicon) | [.dmg](https://github.com/fancydirty/mediary-scout/releases/latest) | Signed and notarized |
-| Windows (x64) | [.exe](https://github.com/fancydirty/mediary-scout/releases/latest) | Unsigned: when SmartScreen prompts, click "Run anyway" |
-
-Install, open it, connect a drive and add an AI model in Settings, then search a title and hit 获取. The app tells you when a new version is out.
-
-### Docker (NAS / router / server)
+## Install (Docker)
 
 ```bash
 git clone https://github.com/fancydirty/mediary-scout && cd mediary-scout
 docker compose up -d
 ```
 
-Open `http://<host>:3000` and configure it in Settings. Later updates are one click in **Settings → 更新**, or daily on a schedule you set. Build mirrors for mainland China, multi-user, backups, and a prompt that lets an AI agent deploy it for you are all in the **[deploy guide](docs/deploy.md)** (Chinese).
+Open `http://<host>:3000`, connect a drive and add an AI model in Settings, then search a title and hit 获取. Upgrade by running `./scripts/deploy.sh` in the deployment directory. Build mirrors for mainland China, multi-user, backups, and a prompt that lets an AI agent deploy it for you are all in the **[deploy guide](docs/deploy.md)** (Chinese).
 
-| | Desktop app | Docker |
-|---|---|---|
-| Best for | Personal use on Mac / Windows | NAS or server, always on |
-| Scheduled gap-fill | While the app is open | 24/7 |
-| Multi-user | No | Yes |
-| Phone access | This machine only | Devices on the same LAN |
-
-Either way, bringing your own OpenAI-compatible AI model endpoint is an optional upgrade (the key stays in your own instance). Without a configured AI model, the app defaults to Kilo Code's free public model pool (no signup needed; the acquisition conversation context - search queries, task and message content, candidate results, file names - is sent to Kilo and its upstream model providers). Metadata works out of the box. Resource search uses PanSou: Docker bundles one, the desktop app defaults to a public instance you can swap for your own in Settings; Prowlarr can be added for magnets.
+Bringing your own OpenAI-compatible AI model endpoint is an optional upgrade (the key stays in your own instance). Without a configured AI model, the app defaults to Kilo Code's free public model pool (no signup needed; the acquisition conversation context - search queries, task and message content, candidate results, file names - is sent to Kilo and its upstream model providers). Metadata works out of the box. Resource search uses PanSou: the bundled instance works out of the box and can be swapped for your own in Settings; Prowlarr can be added for magnets.
 
 ## Supported drives
 
 When multiple drives are connected, the agent unifies all drive pools, checks live free space before every transfer, and can even complete a single season across multiple drives ([Multi-Drive Agent overview](https://mediaryscout.app/features/multi-drive-agent/)):
 
 - **Quark**: share-link transfer; QR login; the largest pool on PanSou.
-- **UC Drive**: share-link transfer; QR login; generous free storage.
 - **115**: share links + magnets; QR login.
-- **123**: share links + magnets; free accounts can transfer; QR login. [Setup](docs/deploy.md#123网盘连接)
-- **GuangYaPan (光鸭)**: share links + magnets; paste a token to log in. [Setup](docs/deploy.md#光鸭云盘guangyapan连接)
-- **Tianyi (天翼)**: share-link transfer; QR login; few movies. [Setup](docs/deploy.md#天翼云盘连接)
 
-Per-drive resource counts, and why only these six: [Cloud drive comparison](https://mediaryscout.app/guides/which-cloud-drive/) · [drive evaluations](docs/drive-brand-evaluations.md) (Chinese).
+## Library & automation
+
+- **Four shelves**: movies / TV / variety / anime land in separate trees. Each drive can customise its root name, the four shelf names, and the mount prefix SmartStrm sees.
+- **Emby integration**: titles already in Emby are matched by TMDB id and never searched again; one Emby library scan is triggered after a run lands files. Library names are configurable.
+- **SmartStrm automation webhook**: after landing, an `a_task` is sent per directory. Landings in the same directory are merged during a quiet window (15s default, 120s max wait); HMAC-SHA256 signatures, retries, a delivery log and a test button are built in. Paths include the drive's SmartStrm mount prefix.
 
 ## More docs
 
@@ -81,16 +61,14 @@ Per-drive resource counts, and why only these six: [Cloud drive comparison](http
 
 ## Disclaimer
 
-Mediary Scout is open-source, self-hosted software. It is not offered, and never will be offered, as a hosted service: you run your own instance and bring your own drive and AI model credentials. It performs the same file operations you could do by hand in your own cloud drive. See [project positioning](docs/distribution-and-legal-positioning.md). Not affiliated with 115, Quark, UC, GuangYaPan, 123, Tianyi, TMDB, or any indexer.
+Mediary Scout is open-source, self-hosted software. It is not offered, and never will be offered, as a hosted service: you run your own instance and bring your own drive and AI model credentials. It performs the same file operations you could do by hand in your own cloud drive. See [project positioning](docs/distribution-and-legal-positioning.md). Not affiliated with 115, Quark, TMDB, Emby, SmartStrm, or any indexer.
 
 ## Credits
 
 - [PanSou](https://github.com/fish2018/pansou-web): resource search backend
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr): indexer manager (optional)
 - [p115client](https://github.com/ChenyangGao/p115client): 115 API reference
-- [p123client](https://github.com/ChenyangGao/p123client): 123 API reference
-- [AList](https://github.com/AlistGo/alist): GuangYaPan API reference (`drivers/guangyapan`)
-- [cloud189-auto-save](https://github.com/1307super/cloud189-auto-save) / [cloudpan189-api](https://github.com/tickstep/cloudpan189-api): Tianyi API references
+- SmartStrm: `.strm` generation and the `a_task` webhook contract
 - [TMDB](https://www.themoviedb.org/): metadata (this product is not endorsed or certified by TMDB)
 
 ## Star History

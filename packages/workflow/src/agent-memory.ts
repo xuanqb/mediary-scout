@@ -32,7 +32,7 @@ export interface AgentMemory {
   description: string;
   kind: AgentMemoryKind;
   body: string;
-  /** Set when the lesson is specific to one drive brand (e.g. "pan123"). */
+  /** Set when the lesson is specific to one drive brand (e.g. "quark"). */
   provider: string | null;
   createdAt: string;
   updatedAt: string;

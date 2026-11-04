@@ -913,6 +913,17 @@ p {
   color: var(--accent);
 }
 
+/* Emby 已有: 在 Emby 库里,但没落到已连接的网盘上 —— 不参与补集,也不标成缺集。 */
+.episode-cell.in-emby {
+  background: rgba(155, 130, 255, 0.12);
+  border-color: rgba(155, 130, 255, 0.5);
+  border-style: dashed;
+}
+
+.episode-cell.in-emby span {
+  color: #b8a6ff;
+}
+
 .episode-cell.provider-ahead {
   background: rgba(83, 157, 245, 0.12);
   border-color: rgba(83, 157, 245, 0.55);
@@ -2319,6 +2330,19 @@ p {
   display: flex;
   gap: 10px;
   margin-top: 4px;
+}
+
+.library-category-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.library-category-select select {
+  width: auto;
+  padding: 3px 8px;
 }
 
 /* Season rows */
@@ -4188,6 +4212,124 @@ select.setting-control {
   margin-top: 9px;
   opacity: 0.55;
   transition: opacity 0.15s;
+}
+
+.drive-library-dirs {
+  margin-top: 8px;
+}
+
+.drive-library-dirs > summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.drive-library-dirs .push-form {
+  margin-top: 8px;
+}
+
+.automation-enabled,
+.automation-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.automation-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.automation-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.automation-log {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 12px;
+}
+
+.automation-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+
+.automation-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.automation-log-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.automation-log-time {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.automation-log-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-log-status {
+  white-space: nowrap;
+  color: var(--accent);
+}
+
+.automation-log-item.is-failed .automation-log-status {
+  color: var(--negative);
+}
+
+@media (max-width: 560px) {
+  .automation-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Emby 四个媒体库名称：两列，窄屏自动落成一列。 */
+.emby-library-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.emby-library-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.emby-library-field > span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 560px) {
+  .emby-library-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .drive-card:hover .drive-card-actions,

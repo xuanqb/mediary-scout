@@ -1,7 +1,7 @@
 /**
  * The 网盘连接 section-header badge, derived from ALL connected drives — not just
  * 115. Issue #93: the header used getPan115ConnectionStatus() alone, so a user
- * whose only drive is 光鸭/夸克 saw a permanent misleading 未连接 while the
+ * whose only drive is 夸克 saw a permanent misleading 未连接 while the
  * per-drive rows right below showed their drive as fine. Pure so it's testable;
  * the page feeds it the drives list plus the legacy .env-115 flag (an env cookie
  * predates connected_storages rows and deserves its distinct label).

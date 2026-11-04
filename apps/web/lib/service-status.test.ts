@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assrtPills,
+  embyPills,
   isEnvBackedValue,
   jevPills,
   llmPills,
@@ -320,5 +321,33 @@ describe("haisouPills（输入 = getHaisouApiKey 的生效值）", () => {
     },
   ])("$name", ({ input, want }) => {
     expect(haisouPills(input)).toEqual(want);
+  });
+});
+
+describe("embyPills（输入 = 账号设置里的生效值）", () => {
+  const SKIP: ServicePill = { label: "已有集跳过搜索", tone: "neutral" };
+  it.each<Case<typeof embyPills>>([
+    {
+      name: "neither → 未接入",
+      input: { baseURL: "", apiKeySet: false },
+      want: [{ label: "未接入", tone: "off" }],
+    },
+    {
+      name: "only URL → 配置不全",
+      input: { baseURL: "http://emby.lan:8096", apiKeySet: false },
+      want: [{ label: "配置不全", tone: "warn" }],
+    },
+    {
+      name: "only key → 配置不全",
+      input: { baseURL: "  ", apiKeySet: true },
+      want: [{ label: "配置不全", tone: "warn" }],
+    },
+    {
+      name: "URL + key → 已接入 + 已有集跳过搜索",
+      input: { baseURL: "http://emby.lan:8096", apiKeySet: true },
+      want: [{ label: "已接入", tone: "on" }, SKIP],
+    },
+  ])("$name", ({ input, want }) => {
+    expect(embyPills(input)).toEqual(want);
   });
 });

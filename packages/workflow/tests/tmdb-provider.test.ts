@@ -74,6 +74,7 @@ describe("TmdbMetadataProvider", () => {
         id: "tmdb_tv_289271",
         tmdbId: 289271,
         type: "tv",
+        libraryCategory: "tv",
         title: "翘楚",
         originalTitle: "翘楚",
         year: 2026,

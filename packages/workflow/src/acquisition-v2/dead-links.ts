@@ -6,10 +6,9 @@
  * a real resource forever, so we only record on deterministic death signals.
  */
 
-import { parseGuangYaShareUrl } from "../guangya-client.js";
 import { parsePan115ShareUrl } from "../storage-115-executor.js";
 
-export type DeadLinkKind = "pan115" | "magnet" | "guangya";
+export type DeadLinkKind = "pan115" | "magnet";
 
 /**
  * How long a SOFT (magnet) dead-link is honored before it resurrects (becomes
@@ -58,15 +57,6 @@ export interface DeadLinkStore {
   listDeadLinkKeys(options?: { now?: string }): Promise<string[]>;
 }
 
-/** 光鸭 share death, from the EXECUTOR's loud messages (guangya-storage-executor):
- *  dead/cancelled/malformed link, or the share opens but lists nothing. Deliberately
- *  NOT matched: GUANGYA_RESTORE_TIMEOUT (still running), GUANGYA_RESTORE_FAILED (a
- *  task error, not the link), 参数错误 (ambiguous), no-video (the share is alive). */
-const GUANGYA_DEATH_MESSAGE = /分享已失效|分享链接错误|分享不存在|GUANGYA_SHARE_EMPTY/;
-
-/** How long a 光鸭 share death is honored. SOFT: an unlistable share (restricted by
- *  its owner, content under review) can become usable again. */
-export const GUANGYA_DEAD_LINK_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 const MAGNET_BTIH = /btih:([0-9a-fA-F]{40})/;
 
 /**
@@ -85,11 +75,6 @@ export function deadLinkKey(url: string): { key: string; kind: DeadLinkKind } | 
   const magnet = url.match(MAGNET_BTIH);
   if (magnet) {
     return { key: `magnet:${magnet[1]!.toLowerCase()}`, kind: "magnet" };
-  }
-  // Same parser the executor transfers with — the whole path segment is the id.
-  const guangya = parseGuangYaShareUrl(url);
-  if (guangya) {
-    return { key: `guangya:${guangya.shareId}`, kind: "guangya" };
   }
   return null;
 }
@@ -115,9 +100,6 @@ export function deadLinkReason(
     return null;
   }
   const message = attempt.providerMessage ?? "";
-  if (kind === "guangya") {
-    return attempt.status === "failed" && GUANGYA_DEATH_MESSAGE.test(message) ? message : null;
-  }
   if (DEATH_MESSAGE.test(message)) {
     return message;
   }

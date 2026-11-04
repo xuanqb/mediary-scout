@@ -5,7 +5,6 @@ import type { CandidateRegistry } from "./candidate-registry.js";
 import {
   deadLinkKey,
   deadLinkReason,
-  GUANGYA_DEAD_LINK_TTL_MS,
   UNRESOLVED_MAGNET_DEAD_LINK_TTL_MS,
   type DeadLinkStore,
 } from "./dead-links.js";
@@ -93,11 +92,9 @@ export class RealStorageV2 implements StorageV2 {
     // fake/dead torrent) gets a much longer soft TTL so we don't re-transfer junk.
     const permanent = identity.kind === "pan115";
     const ttlMs =
-      identity.kind === "guangya"
-        ? GUANGYA_DEAD_LINK_TTL_MS
-        : !permanent && /name == infohash/.test(reason)
-          ? UNRESOLVED_MAGNET_DEAD_LINK_TTL_MS
-          : undefined;
+      !permanent && /name == infohash/.test(reason)
+        ? UNRESOLVED_MAGNET_DEAD_LINK_TTL_MS
+        : undefined;
     await this.deadLinkStore.recordDeadLink({
       key: identity.key,
       kind: identity.kind,

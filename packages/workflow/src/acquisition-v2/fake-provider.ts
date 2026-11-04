@@ -15,7 +15,7 @@ import type { MergedSourceHealth } from "../resource-source-health.js";
 export interface SimResourceCandidate {
   id: string;
   title: string;
-  /** Resource channel or drive brand ("115" | "quark" | "uc" | "123" | "tianyi" | "guangya" | "magnet").
+  /** Resource channel or drive brand ("115" | "quark" | "magnet").
    *  In the unified multi-drive model, candidates from all connected drives are presented
    *  together; `drive` and `driveLabel` tell the agent and sandbox which brand/channel
    *  this candidate belongs to. */

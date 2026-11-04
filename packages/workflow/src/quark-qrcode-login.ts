@@ -1,22 +1,15 @@
 /**
- * 阿里云盘族 (Alibaba cloud-drive family) QR-code login — serves 夸克 AND UC over
- * ONE CAS flow. Originally quark-only; UC joined 2026-10-23 after live probing
- * confirmed the same protocol end to end (getTokenForQrcodeLogin →
- * getServiceTicketByQrcodeToken → a `st=` redemption at the drive host).
+ * 夸克网盘 QR-code login: getTokenForQrcodeLogin → getServiceTicketByQrcodeToken
+ * → a `st=` redemption at the drive host.
  *
- * The two differ ONLY in the profile: CAS host, client_id, the QR-content URL
- * template (the opaque path segment is brand-specific — using 夸克's `4_eMHBJ`
- * on UC redirects into the 夸克 app), the drive-host redemption URL, and the
- * cookie keys the session rides on.
- *
- * ⚠️ The service_ticket → cookie redemption is the FRAGILE hop on both brands:
- * it can only be confirmed by a REAL phone scan. Cookie paste stays as the
- * fallback everywhere this is used.
+ * ⚠️ The service_ticket → cookie redemption is the FRAGILE hop: it can only be
+ * confirmed by a REAL phone scan. Cookie paste stays as the fallback everywhere
+ * this is used.
  */
 
 // One-way import: quark-cookie-client imports only fetch-with-timeout, so this
 // does not create a cycle.
-import { parseCloudDriveUid } from "./quark-cookie-client.js";
+import { parseQuarkUid } from "./quark-cookie-client.js";
 
 export type QuarkQrFetchJson = (
   url: string,
@@ -32,11 +25,11 @@ export type QuarkQrRawFetch = (
   init: { method: string; headers?: Record<string, string>; redirect?: "manual" },
 ) => Promise<QuarkQrRawResponse>;
 
-/** The per-brand half of the family CAS flow. */
+/** The CAS flow profile. */
 export interface CloudDriveQrProfile {
-  key: "quark" | "uc";
+  key: "quark";
   label: string;
-  /** CAS client id — 夸克 532, UC 381 (both confirmed live). */
+  /** CAS client id. */
   clientId: string;
   /** CAS endpoint base, no trailing slash (…/cas/ajax). */
   casBase: string;
@@ -70,42 +63,6 @@ export const QUARK_QR_PROFILE: CloudDriveQrProfile = {
   userAgent: DEFAULT_UA,
   driveCookieKeys: ["__pus", "__uid", "__kps", "__ktd", "__puus", "_UP_A4A_11_", "_UP_D_"],
   redirectHosts: ["pan.quark.cn", "quark.cn", "uop.quark.cn"],
-};
-
-/**
- * UC — captured live 2026-10-23.
- * - CAS lives on api.open.uc.cn (NOT uop.uc.cn, which does not resolve).
- * - The QR path segment is `1_n0ZCv`; 夸克's `4_eMHBJ` on su.uc.cn redirects into
- *   the 夸克 app, i.e. scanning it would never log into UC.
- * - client_id 381 is the one drive.uc.cn's own login page uses.
- * - UC additionally rides on `_UP_*` / `ctoken`, so those are collected too.
- */
-export const UC_QR_PROFILE: CloudDriveQrProfile = {
-  key: "uc",
-  label: "UC网盘",
-  clientId: "381",
-  casBase: "https://api.open.uc.cn/cas/ajax",
-  qrContent: (token, clientId) =>
-    `https://su.uc.cn/1_n0ZCv?uc_param_str=dsdnfrpfbivesscpgimibtbmnijblauputogpintnwktprchmt&token=${encodeURIComponent(token)}&client_id=${clientId}&uc_biz_str=S%3Acustom%7CC%3Atitlebar_fix`,
-  accountInfoUrl: (ticket) =>
-    `https://drive.uc.cn/account/info?st=${encodeURIComponent(ticket)}&fr=pc&platform=pc`,
-  referer: "https://drive.uc.cn",
-  userAgent: DEFAULT_UA,
-  redirectHosts: ["drive.uc.cn", "uc.cn", "api.open.uc.cn"],
-  driveCookieKeys: [
-    "__pus",
-    "__uid",
-    "__kps",
-    "__ktd",
-    "__puus",
-    "_UP_A4A_11_",
-    "_UP_D_",
-    "_UP_F7E_8D_",
-    "_UP_RI_",
-    "_UP_28A_52_",
-    "_UP_6D1_64_",
-    "ctoken",
-  ],
 };
 
 export interface QuarkQrSession {
@@ -212,7 +169,7 @@ export class QuarkQrLoginClient {
       .filter((k) => jar.has(k) && jar.get(k))
       .map((k) => `${k}=${jar.get(k)}`)
       .join("; ");
-    const providerUid = parseCloudDriveUid(cookie);
+    const providerUid = parseQuarkUid(cookie);
     if (!jar.get("__pus") || !providerUid) {
       throw new Error(
         `${this.errCode("EXCHANGE_FAILED")}: no drive cookie (missing __pus/__uid) — the service_ticket may be stale or the exchange endpoint changed`,
@@ -222,7 +179,7 @@ export class QuarkQrLoginClient {
   }
 
   private errCode(suffix: string): string {
-    return `${this.profile.key === "uc" ? "UC" : "QUARK"}_QR_${suffix}`;
+    return `QUARK_QR_${suffix}`;
   }
 
   private headers(jar?: Map<string, string>): Record<string, string> {

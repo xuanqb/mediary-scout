@@ -25,7 +25,6 @@ import {
   resolveWorkerDeps,
   storageParentForTitle,
   type AccountWorkerContext,
-  type MayStartRun,
   type QueuedType2WorkerResult,
   type ResolveAccountWorkerContext,
   type SeasonMetadataSync,
@@ -197,14 +196,12 @@ export async function runQueuedReplaceRequest(
     now?: () => string;
     resolveAccountContext?: ResolveAccountWorkerContext;
     onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-    mayStartRun?: MayStartRun;
     /** The worker's drive filter and claim callback when queued runs go side by side. */
     claim?: QueueClaimOptions;
   },
 ): Promise<QueuedType2WorkerResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const repository = input.repository;
-  if (input.mayStartRun && !input.mayStartRun()) return { status: "idle" };
   const claimed = await claimNextQueuedRun(repository, "replace_request", now(), input.claim);
   if (!claimed) return { status: "idle" };
   const runId = claimed.workflowRun.id;
@@ -388,7 +385,12 @@ export async function runQueuedReplaceRequest(
         ...common,
         title: claimed.title,
         categoryParentId: requireCategoryParent(
-          storageParentForTitle(claimed.title, deps.storageParentDirectoryId, deps.animeStorageParentDirectoryId),
+          storageParentForTitle(claimed.title, {
+            tv: deps.storageParentDirectoryId,
+            anime: deps.animeStorageParentDirectoryId,
+            movies: deps.moviesParentDirectoryId,
+            variety: deps.varietyStorageParentDirectoryId,
+          }),
         ),
         seasons,
         lockSeasonNumber: lockState.season.seasonNumber,

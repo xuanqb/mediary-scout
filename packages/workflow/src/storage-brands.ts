@@ -12,68 +12,41 @@
  */
 import { parsePan115Uid } from "./account-credentials.js";
 import type { ResourceType } from "./domain.js";
-import { isGuangYaAuthError, parseGuangYaUid } from "./guangya-client.js";
 import { isPan115AuthError } from "./pan115-cookie-client.js";
-import { isPan123AuthError, parsePan123Uid } from "./pan123-client.js";
-import { isQuarkAuthError, parseCloudDriveUid, parseQuarkUid } from "./quark-cookie-client.js";
-import { isTianyiAuthError, parseTianyiUid } from "./tianyi-client.js";
+import { isQuarkAuthError, parseQuarkUid } from "./quark-cookie-client.js";
 
-export type StorageProvider = "pan115" | "quark" | "uc" | "guangya" | "tianyi" | "pan123";
-export type ResourceProviderKind =
-  | "pansou-115"
-  | "pansou-quark"
-  | "pansou-uc"
-  | "pansou-magnet"
-  | "pansou-tianyi"
-  | "pansou-123"
-  | "pansou-guangya"
-  | "prowlarr";
+export type StorageProvider = "pan115" | "quark";
+export type ResourceProviderKind = "pansou-115" | "pansou-quark" | "pansou-magnet" | "prowlarr";
 
 export interface StorageBrand {
   provider: StorageProvider;
   /** Display name shown in the UI (switcher chip, settings tab). */
   label: string;
   /** Extract the instance-wide-unique account id from the brand's credential —
-   *  a cookie string for cookie brands (115/夸克), a JWT access token for 光鸭,
-   *  the loginName for 天翼. Callers pass the brand-appropriate string, never a
-   *  JSON blob (a blob would rotate with tokens and destabilize
+   *  a cookie string for both cookie brands. Callers pass the brand-appropriate
+   *  string, never a JSON blob (a blob would rotate with tokens and destabilize
    *  UNIQUE(provider, provider_uid)). */
   parseUid: (credential: string) => string | null;
   /** Whether an error is this brand's dead-credential signal (drives freeze on it). */
   isAuthError: (err: unknown) => boolean;
-  /** Resource providers applicable to this brand. Share-link brands (夸克/天翼)
-   *  have no magnet web API, so they omit "prowlarr" — magnet is 115/光鸭/123 only. */
+  /** Resource providers applicable to this brand. 夸克 has no magnet web API, so
+   *  it omits "prowlarr" — magnet is 115 only. */
   resourceProviderKinds: ResourceProviderKind[];
-  /** Whether to strengthen the Chinese-subs soft default for this brand. When true,
-   *  the agent prompt emphasizes that Chinese-titled resources from this drive are
-   *  more likely to carry Chinese subs (these are Chinese-world drives where resources
-   *  mostly come from the Chinese community). Set to false for magnet-only drives. */
+  /** Whether to strengthen the Chinese-subs soft default for this brand. Both
+   *  supported drives are Chinese-world drives where resources mostly come from
+   *  the Chinese community. */
   assumeChineseSubsFromChineseTitle: boolean;
-  /** Credential shape: "cookie" brands (115/夸克) store a raw cookie string;
-   *  "token" brands (光鸭/天翼) store a JSON token blob. workflow-runtime routes
-   *  credential extraction, executor dispatch, and refresh persistence on this
-   *  field — replacing the old hardcoded `provider === "guangya"` checks. */
-  authKind: "cookie" | "token";
+  /** Credential shape. Both supported brands authenticate with a raw cookie string. */
+  authKind: "cookie";
   /** Parent directory id under which connect-time provisioning creates the
-   *  Mediary Scout/{Movies,TV,Anime} tree — per-brand DATA, not logic. 115 & 夸克
-   *  both root at "0"; 光鸭 roots at "" (account root); 天翼 personal-cloud roots
-   *  at "-11". Consumed as `provisionCategoryDirs`' baseParentId so the root is
+   *  category tree — per-brand DATA, not logic. Both 115 & 夸克 root at "0".
+   *  Consumed as `provisionCategoryDirs`' baseParentId so the root is
    *  registry-driven instead of hardcoded at each provision call site. */
   provisionRootId: string;
-  /** For "token" brands only: the credential-blob keys that MUST each be a
-   *  non-empty string for the drive to count as connected — 光鸭 needs
-   *  accessToken+refreshToken (deviceId optional, rides in the blob); 天翼 needs
-   *  the sessionKey+accessToken+refreshToken trio. `extractStorageCredential`
-   *  reads this instead of a per-brand `if`, returning the raw blob when every
-   *  key is present (the client trims/validates the rest downstream). Undefined
-   *  for cookie brands (115/夸克), which authenticate with a cookie string. */
-  requiredCredentialKeys?: string[];
   /** How the brand's executor decides a write is inside the drive's scope.
-   *  "parents": it looks the target's parents up on the drive until it reaches a scope
-   *  root (115 / 夸克). "listed": it only writes into a scope root, a dir it created, or
-   *  a dir it listed under an in-scope parent in this run (光鸭 / 天翼 / 123) — a dir id
-   *  handed over from another run must be reached again from a scope root first. */
-  writeScope: "parents" | "listed";
+   *  Both supported brands look the target's parents up on the drive until they
+   *  reach a scope root. */
+  writeScope: "parents";
 }
 
 export const STORAGE_BRANDS: StorageBrand[] = [
@@ -99,66 +72,12 @@ export const STORAGE_BRANDS: StorageBrand[] = [
     provisionRootId: "0", // 夸克 account root
     writeScope: "parents",
   },
-  {
-    // UC joined 2026-10-23: the SAME Alibaba family protocol as 夸克 (share
-    // token → detail → save → poll, identical envelope, identical 31001 auth
-    // code, identical cookie key names) — verified live end-to-end. Share links
-    // only, like 夸克: UC's magnet/offline API is gated behind a runtime-injected
-    // window.encryption, so magnets fail loud rather than being attempted.
-    provider: "uc",
-    label: "UC网盘",
-    parseUid: parseCloudDriveUid,
-    isAuthError: isQuarkAuthError, // same error class — one family, one signal
-    resourceProviderKinds: ["pansou-uc"],
-    assumeChineseSubsFromChineseTitle: true,
-    authKind: "cookie",
-    provisionRootId: "0", // UC account root
-    writeScope: "parents", // family protocol: getFileInfo walks pdir_fid up
-  },
-  {
-    provider: "guangya",
-    label: "光鸭云盘",
-    parseUid: parseGuangYaUid,
-    isAuthError: isGuangYaAuthError,
-    // Own share links (restore_share, 2026-09) + magnet/offline — dual path like 123.
-    resourceProviderKinds: ["pansou-guangya", "pansou-magnet", "prowlarr"],
-    assumeChineseSubsFromChineseTitle: false,
-    authKind: "token",
-    provisionRootId: "", // 光鸭 account root
-    requiredCredentialKeys: ["accessToken", "refreshToken"],
-    writeScope: "listed",
-  },
-  {
-    provider: "tianyi",
-    label: "天翼云盘",
-    parseUid: parseTianyiUid,
-    isAuthError: isTianyiAuthError,
-    resourceProviderKinds: ["pansou-tianyi"],
-    assumeChineseSubsFromChineseTitle: true,
-    authKind: "token",
-    provisionRootId: "-11", // 天翼个人云 root folder id
-    requiredCredentialKeys: ["sessionKey", "accessToken", "refreshToken"],
-    writeScope: "listed",
-  },
-  {
-    provider: "pan123",
-    label: "123网盘",
-    parseUid: parsePan123Uid,
-    isAuthError: isPan123AuthError,
-    // Share links + native offline (magnet/ed2k) — OpenList drivers/123 OfflineDownload.
-    resourceProviderKinds: ["pansou-123", "prowlarr"],
-    assumeChineseSubsFromChineseTitle: true,
-    authKind: "token",
-    provisionRootId: "0", // 123 个人云根
-    requiredCredentialKeys: ["token"],
-    writeScope: "listed",
-  },
 ];
 
 /**
  * Map a brand's (or multiple brands') resource-provider kinds to the PanSou /
  * Haisou link types its acquisitions may transfer. A 夸克 drive can only save
- * 夸克 share links; 光鸭 / 123 / 115 take their OWN share links plus magnets.
+ * 夸克 share links; 115 takes its OWN share links plus magnets.
  *
  * In unified multi-drive mode, callers pass the UNION of `resourceProviderKinds`
  * across all active connected drives (or call `allowedResourceTypesForProviders`),
@@ -176,18 +95,6 @@ export function allowedResourceTypesForKinds(kinds: readonly string[]): Resource
   if (kinds.includes("pansou-quark")) {
     out.add("quark");
   }
-  if (kinds.includes("pansou-uc")) {
-    out.add("uc");
-  }
-  if (kinds.includes("pansou-tianyi")) {
-    out.add("tianyi");
-  }
-  if (kinds.includes("pansou-123")) {
-    out.add("123");
-  }
-  if (kinds.includes("pansou-guangya")) {
-    out.add("guangya");
-  }
   if (kinds.includes("pansou-magnet") || kinds.includes("prowlarr")) {
     out.add("magnet");
   }
@@ -199,7 +106,7 @@ export function allowedResourceTypesForKinds(kinds: readonly string[]): Resource
 
 /**
  * Union of `ResourceProviderKind`s and `ResourceType`s across a list of connected
- * storage providers (e.g. `["pan115", "quark", "pan123"]`). Falls back to `pan115`
+ * storage providers (e.g. `["pan115", "quark"]`). Falls back to `pan115`
  * when no registered provider is given.
  */
 export function allowedResourceTypesForProviders(providers: readonly string[]): {
@@ -236,13 +143,11 @@ export function isRegisteredStorageProvider(provider: string): provider is Stora
 }
 
 /** Whether the drive's executor writes only where it listed or created in this run
- *  (see StorageBrand.writeScope). False for unknown or missing providers. */
+ *  (see StorageBrand.writeScope). Kept as an API for callers; both supported brands
+ *  use "parents", so this is always false. */
 export function brandWritesOnlyListedDirectories(provider: string | undefined): boolean {
-  return (
-    provider !== undefined &&
-    isRegisteredStorageProvider(provider) &&
-    getStorageBrand(provider).writeScope === "listed"
-  );
+  if (!provider || !isRegisteredStorageProvider(provider)) return false;
+  return false;
 }
 
 /** Whether a brand can use Prowlarr (磁力/PT) — 115 yes, 夸克 no (no magnet API).
@@ -256,9 +161,7 @@ export function brandSupportsProwlarr(provider: string): boolean {
 }
 
 /** Display labels of every registered brand that can use Prowlarr, in registry
- *  order. Settings derives "which drives magnet works on" from this instead of a
- *  hand-written note — the old 「仅对 115 盘生效」 went stale the day 光鸭/123 gained
- *  magnet. Same source of truth as brandSupportsProwlarr. */
+ *  order. */
 export function brandsSupportingProwlarr(): string[] {
   return STORAGE_BRANDS.filter((brand) => brand.resourceProviderKinds.includes("prowlarr")).map(
     (brand) => brand.label,

@@ -4,7 +4,7 @@ import type {
   MediaType,
   TrackedSeason,
 } from "./domain.js";
-import { classifyMediaType } from "./media-classification.js";
+import { classifyLibraryCategory, classifyMediaType } from "./media-classification.js";
 import type { MediaSearchCandidate, MediaSearchProvider } from "./search-view.js";
 
 /** Refine a TV details record into tv/anime by genre + origin. */
@@ -13,6 +13,13 @@ function tvMediaType(details: TmdbTvDetails): MediaType {
     baseType: "tv",
     genreIds: details.genres,
     originCountries: details.origin_country,
+  });
+}
+
+function tvLibraryCategory(details: TmdbTvDetails) {
+  return classifyLibraryCategory({
+    mediaType: tvMediaType(details),
+    genreIds: details.genres,
   });
 }
 
@@ -461,6 +468,7 @@ export async function prepareTrackingTarget(input: TvTrackingTargetInput): Promi
       id: titleId,
       tmdbId: details.id,
       type: tvMediaType(details),
+      libraryCategory: tvLibraryCategory(details),
       originCountries: details.origin_country,
       title,
       originalTitle: normalizeTitle(details.original_name) || title,
@@ -550,6 +558,7 @@ export async function prepareMovieTarget(input: {
         genreIds: details.genres,
         originCountries: details.origin_country,
       }),
+      libraryCategory: "movies",
       // Carried so the movie agent can skip the 中文 subtitle floor for 国产片
       // (CN-origin = natively Chinese-spoken; details.origin_country is mapped from
       // the movie's production_countries). Search itself stays origin-independent.
@@ -618,6 +627,7 @@ export async function prepareSeriesTarget(input: {
       id: titleId,
       tmdbId: details.id,
       type: tvMediaType(details),
+      libraryCategory: tvLibraryCategory(details),
       originCountries: details.origin_country,
       title,
       originalTitle: normalizeTitle(details.original_name) || title,

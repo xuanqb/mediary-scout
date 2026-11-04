@@ -2,6 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { queueCandidateSeries, queueCandidateTracking, reserveCandidate } from "../lib/workflow-runtime";
+import type { LibraryDirNames } from "../lib/workflow-runtime";
+import type { AutomationConfig } from "../lib/automation-webhook";
 import { assertNotDemo } from "../lib/demo-mode";
 
 /**
@@ -81,6 +83,44 @@ export async function unbindStorageAction(storageId: string): Promise<UnbindStor
   return { ok: true, message: "已取消绑定（追踪记录已保留，重新绑定同一块盘即可恢复）。" };
 }
 
+/** Settings「媒体库目录」: per-drive root + four shelf directory names. Saving
+ *  re-resolves/creates the tree; existing tracked seasons keep their old dirs. */
+export async function saveDriveLibraryDirsAction(input: {
+  storageId: string;
+  dirs: LibraryDirNames;
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  const { saveDriveLibraryDirs } = await import("../lib/workflow-runtime");
+  try {
+    await saveDriveLibraryDirs(input);
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : String(error) };
+  }
+  revalidatePath("/settings");
+  return { success: true };
+}
+
+/** Manual shelf override: 电影 / 电视剧 / 综艺 / 动漫. */
+export async function setTitleLibraryCategoryAction(input: {
+  titleId: string;
+  category: string;
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  const categories = ["movies", "tv", "variety", "anime"] as const;
+  const category = categories.find((item) => item === input.category);
+  if (!category) {
+    return { success: false, message: "未知的媒体库分类。" };
+  }
+  const { setTitleLibraryCategory } = await import("../lib/workflow-runtime");
+  try {
+    await setTitleLibraryCategory({ titleId: input.titleId, category });
+  } catch (error) {
+    return { success: false, message: error instanceof Error ? error.message : String(error) };
+  }
+  revalidatePath("/show");
+  return { success: true };
+}
+
 export interface ConnectQuarkActionResult {
   ok: boolean;
   message: string;
@@ -88,78 +128,12 @@ export interface ConnectQuarkActionResult {
 
 /** Settings "添加网盘 → 夸克": bind a pasted 夸克 cookie as a new drive. */
 export async function connectQuarkAction(cookie: string): Promise<ConnectQuarkActionResult> {
-  return connectCloudFamilyCookieAction(cookie, "quark");
-}
-
-/** Settings "添加网盘 → UC网盘": bind a pasted UC cookie as a new drive. Same
- *  family protocol as 夸克, so it reuses the whole connect/probe/provision path. */
-export async function connectUcAction(cookie: string): Promise<ConnectQuarkActionResult> {
-  return connectCloudFamilyCookieAction(cookie, "uc");
-}
-
-/** Shared body for the 阿里云盘族 (夸克 / UC) cookie actions — the two differ only
- *  in which runtime function runs and the label in the success message. */
-async function connectCloudFamilyCookieAction(
-  cookie: string,
-  provider: "quark" | "uc",
-): Promise<ConnectQuarkActionResult> {
-  assertNotDemo();
-  const label = provider === "uc" ? "UC网盘" : "夸克网盘";
-  try {
-    const { connectQuarkCookie, connectUcCookie } = await import("../lib/workflow-runtime");
-    const { providerUid } = await (provider === "uc" ? connectUcCookie(cookie) : connectQuarkCookie(cookie));
-    revalidatePath("/settings");
-    return { ok: true, message: `${label}已连接（账号 ${providerUid.slice(0, 10)}…）。` };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-/** Settings "添加网盘 → 光鸭": bind a pasted access_token + refresh_token as a new
- *  drive. Mirrors connectQuarkAction; the token blob is validated + provisioned in
- *  connectGuangYa (workflow-runtime). */
-export async function connectGuangYaAction(
-  accessToken: string,
-  refreshToken: string,
-): Promise<ConnectQuarkActionResult> {
   assertNotDemo();
   try {
-    const { connectGuangYa } = await import("../lib/workflow-runtime");
-    const { providerUid } = await connectGuangYa(accessToken, refreshToken);
+    const { connectQuarkCookie } = await import("../lib/workflow-runtime");
+    const { providerUid } = await connectQuarkCookie(cookie);
     revalidatePath("/settings");
-    return { ok: true, message: `光鸭云盘已连接（账号 ${providerUid.slice(0, 10)}…）。` };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-/** Settings "添加网盘 → 天翼": bind a pasted SSON cookie as a new drive. Mirrors
- *  connectGuangYaAction; the SSON is exchanged for a full session (personal +
- *  family credentials) + bound in connectTianyiSson (workflow-runtime). QR-scan
- *  binds via the /api/tianyi/qrcode/confirm route (completeTianyiQrLogin). */
-export async function connectTianyiSsonAction(sson: string): Promise<ConnectQuarkActionResult> {
-  assertNotDemo();
-  try {
-    const { connectTianyiSson } = await import("../lib/workflow-runtime");
-    const { providerUid } = await connectTianyiSson(sson);
-    revalidatePath("/settings");
-    return { ok: true, message: `天翼云盘已连接（账号 ${providerUid.slice(0, 10)}…）。` };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-/** Settings "添加网盘 → 123网盘": bind a pasted 90-day login token as a new drive.
- *  Mirrors connectTianyiSsonAction; the token is probed (listFiles on the root) +
- *  bound in connectPan123Token (workflow-runtime). QR-scan binds via the
- *  /api/pan123/qrcode/confirm route (completePan123QrLogin, Task 8). */
-export async function connectPan123TokenAction(token: string): Promise<ConnectQuarkActionResult> {
-  assertNotDemo();
-  try {
-    const { connectPan123Token } = await import("../lib/workflow-runtime");
-    const { providerUid } = await connectPan123Token(token);
-    revalidatePath("/settings");
-    return { ok: true, message: `123网盘已连接（账号 ${providerUid.slice(0, 10)}…）。` };
+    return { ok: true, message: `夸克网盘已连接（账号 ${providerUid.slice(0, 10)}…）。` };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
@@ -306,14 +280,7 @@ export async function importForeignWorkAction(input: {
   if (input.providerFileIds.length === 0) {
     return { status: "failed", message: "没有可入库的文件。" };
   }
-  const { importForeignWorkFiles, isUpdateInProgress, UpdateInProgressError } = await import("../lib/workflow-runtime");
-  // A container swap mid-import leaves a half-moved folder the retry can't finish. Refuse
-  // upfront while the updater holds new work; importForeignWorkFiles rechecks the hold once
-  // it is counted in flight and throws UpdateInProgressError if the hold was taken in the
-  // gap between here and there, so the swap handshake cannot win that race.
-  if (isUpdateInProgress()) {
-    return { status: "failed", message: "正在更新，更新完成后再入库。" };
-  }
+  const { importForeignWorkFiles } = await import("../lib/workflow-runtime");
   try {
     await importForeignWorkFiles({
       providerFileIds: input.providerFileIds,
@@ -326,9 +293,6 @@ export async function importForeignWorkAction(input: {
       message: `已入库到 ${movieTitle} (${year})。`,
     };
   } catch (error) {
-    if (error instanceof UpdateInProgressError) {
-      return { status: "failed", message: "正在更新，更新完成后再入库。" };
-    }
     return { status: "failed", message: `入库失败：${String(error)}` };
   }
 }
@@ -475,6 +439,104 @@ export async function clearPushChannelAction(key: string): Promise<PushSettingsA
   }
 }
 
+/**
+ * SmartStrm automation webhook. Disabling clears the pending queue (any debounced
+ * tasks must not fire minutes later after the user turned it off); the delivery
+ * log is kept so the user can still inspect what happened.
+ */
+export async function saveAutomationWebhookAction(input: {
+  config: AutomationConfig;
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const {
+      parseAutomationConfig,
+      AUTOMATION_CONFIG_SETTING_KEY,
+      AUTOMATION_PENDING_SETTING_KEY,
+      DEFAULT_AUTOMATION_CONFIG,
+    } = await import("../lib/automation-webhook");
+    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    const existing = parseAutomationConfig(
+      await repository.getAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY),
+    );
+    const next = parseAutomationConfig(
+      JSON.stringify({
+        ...DEFAULT_AUTOMATION_CONFIG,
+        ...input.config,
+        // Blank secret in the form = "keep the saved one" (never echoed back).
+        secret: input.config.secret.trim() || existing.secret,
+      }),
+    );
+    if (next.url && !/^https?:\/\//i.test(next.url)) {
+      return { success: false, message: "Webhook 地址需以 http:// 或 https:// 开头。" };
+    }
+    if (next.enabled && !next.url) {
+      return { success: false, message: "启用自动化前请先填写 Webhook 地址。" };
+    }
+    await repository.setAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY, JSON.stringify(next));
+    if (!next.enabled) {
+      await repository.setAccountSetting(accountId, AUTOMATION_PENDING_SETTING_KEY, "");
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `保存失败：${String(error)}` };
+  }
+}
+
+export async function clearAutomationWebhookAction(): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
+    const { AUTOMATION_CONFIG_SETTING_KEY, AUTOMATION_PENDING_SETTING_KEY } = await import(
+      "../lib/automation-webhook"
+    );
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    await repository.setAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY, "");
+    await repository.setAccountSetting(accountId, AUTOMATION_PENDING_SETTING_KEY, "");
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `清除失败：${String(error)}` };
+  }
+}
+
+export async function testAutomationWebhookAction(input: {
+  url: string;
+  secret: string;
+  taskName: string;
+  storagePath: string;
+  config?: Partial<AutomationConfig>;
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const { testAutomationWebhook } = await import("../lib/automation-webhook");
+    const result = await testAutomationWebhook(input);
+    return result.success
+      ? { success: true, message: result.message }
+      : { success: false, message: result.message };
+  } catch (error) {
+    return { success: false, message: `测试失败：${String(error)}` };
+  }
+}
+
+export async function clearAutomationDeliveriesAction(): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
+    const { AUTOMATION_LOG_SETTING_KEY } = await import("../lib/automation-webhook");
+    await getWorkflowRepository().setAccountSetting(
+      await getCurrentAccountId(),
+      AUTOMATION_LOG_SETTING_KEY,
+      "",
+    );
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `清除失败：${String(error)}` };
+  }
+}
+
 export async function saveDailySweepTimesAction(times: string[]): Promise<PushSettingsActionResult> {
   assertNotDemo();
   if (!Array.isArray(times) || times.length === 0) {
@@ -527,9 +589,6 @@ export async function runPatrolNowAction(): Promise<PushSettingsActionResult & {
       return { success: false, message: "尚未连接任何网盘，请先在「网盘连接」中绑定网盘后再巡检。" };
     }
     const result = await runScheduledType3({ force: true });
-    if (result.skipped === "update_in_progress") {
-      return { success: false, message: "正在更新，更新完成后再巡检。" };
-    }
     return { success: true, checked: result.outcomes.length };
   } catch (error) {
     return { success: false, message: `巡检失败：${String(error)}` };
@@ -782,8 +841,87 @@ export async function savePanSouBaseUrlAction(baseURL: string): Promise<PushSett
   }
 }
 
-export async function saveProwlarrConfigAction(input: {
-  baseURL: string;
+export async function saveEmbyConfigAction(input: {
+  baseUrl: string;
+  apiKey: string;
+  libraryNames: Record<string, string>;
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const {
+      getWorkflowRepository,
+      getCurrentAccountId,
+      EMBY_BASE_URL_SETTING_KEY,
+      EMBY_API_KEY_SETTING_KEY,
+      EMBY_LIBRARY_NAMES_SETTING_KEY,
+    } = await import("../lib/workflow-runtime");
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
+    if (!baseUrl) {
+      await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, "");
+      await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, "");
+      await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, "");
+      return { success: true, message: "已关闭 Emby 联动" };
+    }
+    if (!/^https?:\/\//i.test(baseUrl)) {
+      return { success: false, message: "Emby 地址需以 http:// 或 https:// 开头。" };
+    }
+    const existingKey = (await repository.getAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY))?.trim();
+    const apiKey = input.apiKey.trim() || existingKey || "";
+    if (!apiKey) {
+      return { success: false, message: "请填写 Emby API Key。" };
+    }
+    const { probeEmby } = await import("../lib/emby-client");
+    const names: Record<string, string> = {};
+    for (const key of ["movies", "tv", "variety", "anime"]) {
+      const value = input.libraryNames[key]?.trim();
+      if (value) names[key] = value;
+    }
+    const probe = await probeEmby({
+      baseUrl,
+      apiKey,
+      libraryNames: {
+        movies: names.movies ?? "电影",
+        tv: names.tv ?? "电视剧",
+        variety: names.variety ?? "综艺",
+        anime: names.anime ?? "动漫",
+      },
+    });
+    if (!probe.ok) {
+      return { success: false, message: probe.message };
+    }
+    await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, JSON.stringify(names));
+    await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, baseUrl);
+    await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, apiKey);
+    return { success: true, message: probe.message };
+  } catch (error) {
+    return { success: false, message: `保存失败：${String(error)}` };
+  }
+}
+
+export async function clearEmbyConfigAction(): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const {
+      getWorkflowRepository,
+      getCurrentAccountId,
+      EMBY_BASE_URL_SETTING_KEY,
+      EMBY_API_KEY_SETTING_KEY,
+      EMBY_LIBRARY_NAMES_SETTING_KEY,
+    } = await import("../lib/workflow-runtime");
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    await repository.setAccountSetting(accountId, EMBY_BASE_URL_SETTING_KEY, "");
+    await repository.setAccountSetting(accountId, EMBY_API_KEY_SETTING_KEY, "");
+    await repository.setAccountSetting(accountId, EMBY_LIBRARY_NAMES_SETTING_KEY, "");
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `清空失败：${String(error)}` };
+  }
+}
+
+export async function saveProwlarrConfigAction(input: {  baseURL: string;
   apiKey: string;
 }): Promise<PushSettingsActionResult> {
   assertNotDemo();

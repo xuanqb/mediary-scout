@@ -145,6 +145,21 @@ export function haisouPills(input: { apiKeySet: boolean; fromEnv: boolean }): Se
   return [first, ...source, { label: "每日 100 次免费", tone: "neutral" }];
 }
 
+/** Emby：baseURL / apiKeySet 都来自账号设置（不读 env），两者齐全才算接上。
+ *  「已有集跳过搜索」恒带 —— 它是这个联动的全部目的，不接上时不展示。 */
+export function embyPills(input: { baseURL: string; apiKeySet: boolean }): ServicePill[] {
+  const hasUrl = nonBlank(input.baseURL);
+  const first: ServicePill =
+    hasUrl && input.apiKeySet
+      ? { label: "已接入", tone: "on" }
+      : hasUrl || input.apiKeySet
+        ? { label: "配置不全", tone: "warn" }
+        : { label: "未接入", tone: "off" };
+  return hasUrl && input.apiKeySet
+    ? [first, { label: "已有集跳过搜索", tone: "neutral" }]
+    : [first];
+}
+
 /** assrt：只有 DB 一层（getAssrtToken 不读 env），DB 里有没有 token 就是生效值。 */
 export function assrtPills(input: { tokenSet: boolean }): ServicePill[] {
   return input.tokenSet ? [{ label: "已配置", tone: "on" }] : [{ label: "未配置", tone: "off" }];

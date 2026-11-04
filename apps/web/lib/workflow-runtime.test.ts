@@ -8,6 +8,11 @@ import {
   getLlmConfig,
   getPanSouBaseUrl,
   getProwlarrConfig,
+  getEmbyConfig,
+  parseEmbyLibraryNames,
+  EMBY_BASE_URL_SETTING_KEY,
+  EMBY_API_KEY_SETTING_KEY,
+  EMBY_LIBRARY_NAMES_SETTING_KEY,
   getAccountScopedSettings,
   getJevConfig,
   getJevBaseUrlOverride,
@@ -20,7 +25,6 @@ import {
   movieTargetFromTmdbId,
   PANSOU_BASE_URL_SETTING_KEY,
   DEFAULT_PANSOU_BASE_URL,
-  resolveIsDesktop,
   getTmdbAccesses,
   LLM_BASE_URL_SETTING_KEY,
   LLM_API_KEY_SETTING_KEY,
@@ -33,21 +37,7 @@ import {
   JEV_HEALTH_SETTING_KEY,
   TMDB_API_KEY_SETTING_KEY,
   importForeignWorkFiles,
-  UpdateInProgressError,
 } from "./workflow-runtime";
-
-describe("resolveIsDesktop", () => {
-  it("MEDIA_TRACK_DESKTOP=1 → true (Electron server-launch sets this)", () => {
-    expect(resolveIsDesktop({ MEDIA_TRACK_DESKTOP: "1" })).toBe(true);
-  });
-  it("unset → false (docker/web)", () => {
-    expect(resolveIsDesktop({})).toBe(false);
-  });
-  it("other value → false (only exact \"1\" counts)", () => {
-    expect(resolveIsDesktop({ MEDIA_TRACK_DESKTOP: "0" })).toBe(false);
-    expect(resolveIsDesktop({ MEDIA_TRACK_DESKTOP: "true" })).toBe(false);
-  });
-});
 
 function repoWith(value: string | null) {
   return { getSetting: async () => value };
@@ -375,6 +365,56 @@ describe("getProwlarrConfig", () => {
   });
 });
 
+describe("Emby 联动配置", () => {
+  it("falls back to the four default library names", () => {
+    expect(parseEmbyLibraryNames(null)).toEqual({
+      movies: "电影",
+      tv: "电视剧",
+      variety: "综艺",
+      anime: "动漫",
+    });
+  });
+
+  it("overrides only the names that were set, ignoring blank and garbage", () => {
+    expect(parseEmbyLibraryNames('{"movies":"Films","tv":"  ","anime":"番剧"}')).toEqual({
+      movies: "Films",
+      tv: "电视剧",
+      variety: "综艺",
+      anime: "番剧",
+    });
+    expect(parseEmbyLibraryNames("not json")).toEqual({
+      movies: "电影",
+      tv: "电视剧",
+      variety: "综艺",
+      anime: "动漫",
+    });
+  });
+
+  it("returns null until both base URL and API key exist", async () => {
+    expect(
+      await getEmbyConfig(repoMap({ [EMBY_BASE_URL_SETTING_KEY]: "http://emby.lan:8096" })),
+    ).toBeNull();
+    expect(
+      await getEmbyConfig(repoMap({ [EMBY_API_KEY_SETTING_KEY]: "k" })),
+    ).toBeNull();
+  });
+
+  it("builds the config from settings, parsing library names", async () => {
+    const cfg = await getEmbyConfig(
+      repoMap({
+        [EMBY_BASE_URL_SETTING_KEY]: " http://emby.lan:8096 ",
+        [EMBY_API_KEY_SETTING_KEY]: " secret ",
+        [EMBY_LIBRARY_NAMES_SETTING_KEY]: '{"movies":"Films"}',
+      }),
+    );
+    expect(cfg).toEqual({
+      baseUrl: "http://emby.lan:8096",
+      apiKey: "secret",
+      libraryNames: { movies: "Films", tv: "电视剧", variety: "综艺", anime: "动漫" },
+    });
+  });
+});
+
 describe("movieTargetFromTmdbId (demo provider mode — movie poster enrichment)", () => {
   it("resolves a demo movie candidate carrying its poster", async () => {
     const target = await movieTargetFromTmdbId(1311031); // 我的僵尸女儿 — demo movie candidate
@@ -621,116 +661,6 @@ describe("runScheduledType3（per-slot 认领 + 合并补跑）", () => {
     expect(monitor).not.toHaveBeenCalled(); // 升级当日绝不按新语义重扫
     expect(result.skipped).toBe("before_scheduled_time"); // 21:00 今天还会照常跑
     expect(result.scheduledFor).toBe("21:00");
-  });
-
-  it("更新暂停期间：定时和手动巡检都不跑、不认领时间点，暂停结束后照常补跑", async () => {
-    const repository = await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    const { setUpdateHold, clearUpdateHold } = await import("./update-hold");
-    setUpdateHold(Date.now(), 60_000);
-    try {
-      expect(await rt.runScheduledType3()).toEqual({ skipped: "update_in_progress", outcomes: [] });
-      expect(await rt.runScheduledType3({ force: true })).toEqual({ skipped: "update_in_progress", outcomes: [] });
-      expect(monitor).not.toHaveBeenCalled();
-      expect((await repository.getSetting(rt.LAST_SWEEP_CLAIMS_SETTING_KEY)) ?? null).toBeNull();
-    } finally {
-      clearUpdateHold();
-    }
-    const result = await rt.runScheduledType3();
-    expect(result.skipped).toBeUndefined();
-    expect(monitor).toHaveBeenCalledTimes(1);
-  });
-
-  it("更新暂停期间：runNextQueuedWorkflow 直接返回 idle，不认领排队任务", async () => {
-    const repository = await boot({}, "2026-07-09T06:30");
-    const claim = vi.spyOn(repository, "claimNextQueuedWorkflowRun");
-    const { setUpdateHold, clearUpdateHold } = await import("./update-hold");
-    setUpdateHold(Date.now(), 60_000);
-    try {
-      expect(await rt.runNextQueuedWorkflow()).toEqual({ status: "idle" });
-      expect(claim).not.toHaveBeenCalled();
-    } finally {
-      clearUpdateHold();
-    }
-  });
-
-  it("把 mayStartRun 传给巡检，让它在每次预约前再看一眼暂停", async () => {
-    await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    await rt.runScheduledType3({ force: true });
-    const passed = (monitor.mock.calls[0] as unknown as [{ mayStartRun?: () => boolean }])[0].mayStartRun;
-    expect(typeof passed).toBe("function");
-    expect(passed!()).toBe(true);
-    const { setUpdateHold, clearUpdateHold } = await import("./update-hold");
-    setUpdateHold(Date.now(), 60_000);
-    try {
-      expect(passed!()).toBe(false);
-    } finally {
-      clearUpdateHold();
-    }
-  });
-
-  it("更新暂停在巡检途中生效：释放本次认领的时间点、不记完成，新版本当天补跑", async () => {
-    const repository = await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    const { setUpdateHold, clearUpdateHold } = await import("./update-hold");
-    // The hold is taken after the entry check, while the sweep runs.
-    monitor.mockImplementation((async (input: { mayStartRun?: () => boolean }) => {
-      setUpdateHold(Date.now(), 60_000);
-      expect(input.mayStartRun!()).toBe(false);
-      return [];
-    }) as never);
-    try {
-      const result = await rt.runScheduledType3();
-      expect(result.skipped).toBe("update_in_progress");
-      expect(await claims(repository)).toEqual({ date: "2026-07-09", slots: [] });
-      expect((await repository.getSetting(rt.LAST_SWEEP_COMPLETED_AT_SETTING_KEY)) ?? null).toBeNull();
-    } finally {
-      clearUpdateHold();
-    }
-    monitor.mockImplementation(async () => []);
-    const again = await rt.runScheduledType3();
-    expect(again.skipped).toBeUndefined();
-    expect(await claims(repository)).toEqual({ date: "2026-07-09", slots: ["06:00"] });
-  });
-
-  it("staging 清理因更新暂停停下：同样释放时间点、不记完成", async () => {
-    const repository = await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    janitor.mockImplementation((async () => ({ held: true })) as never);
-    const result = await rt.runScheduledType3();
-    expect(result.skipped).toBe("update_in_progress");
-    expect(await claims(repository)).toEqual({ date: "2026-07-09", slots: [] });
-    expect((await repository.getSetting(rt.LAST_SWEEP_COMPLETED_AT_SETTING_KEY)) ?? null).toBeNull();
-    const passed = (janitor.mock.calls[0] as unknown as [{ mayStartRun?: () => boolean }])[0].mayStartRun;
-    expect(typeof passed).toBe("function");
-  });
-
-  it("暂停在巡检和清理都查过之后才生效：也释放时间点、不记完成", async () => {
-    const repository = await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    const { setUpdateHold, clearUpdateHold } = await import("./update-hold");
-    // No reservation candidates and no shows to clean: neither ever asks mayStartRun.
-    janitor.mockImplementation((async () => {
-      setUpdateHold(Date.now(), 60_000);
-      return { held: false };
-    }) as never);
-    try {
-      const result = await rt.runScheduledType3();
-      expect(result.skipped).toBe("update_in_progress");
-      expect(await claims(repository)).toEqual({ date: "2026-07-09", slots: [] });
-      expect((await repository.getSetting(rt.LAST_SWEEP_COMPLETED_AT_SETTING_KEY)) ?? null).toBeNull();
-    } finally {
-      clearUpdateHold();
-    }
-  });
-
-  it("巡检整个过程都算「进行中」，更新助手的忙碌检查会等它", async () => {
-    await boot({ daily_sweep_times: TIMES }, "2026-07-09T06:30");
-    const { inFlightCount } = await import("./update-hold");
-    let seen = -1;
-    janitor.mockImplementation((async () => {
-      seen = inFlightCount();
-      return { held: false };
-    }) as never);
-    await rt.runScheduledType3({ force: true });
-    expect(seen).toBeGreaterThan(0);
-    expect(inFlightCount()).toBe(0);
   });
 
   it("成功后写 last_sweep_completed_at（含定时路径）", async () => {
@@ -1253,268 +1183,6 @@ describe("resolveJevJudge (the single go/no-go for wrapping the provider)", () =
 });
 
 
-describe("importForeignWorkFiles rechecks the update hold inside the in-flight guard", () => {
-  it("throws UpdateInProgressError before any storage work when the hold is on", async () => {
-    const { setUpdateHold, clearUpdateHold, inFlightCount } = await import("./update-hold");
-    setUpdateHold(Date.now(), 60_000);
-    try {
-      await expect(
-        importForeignWorkFiles({ providerFileIds: ["1"], movieTitle: "沙丘", year: 2021 }),
-      ).rejects.toBeInstanceOf(UpdateInProgressError);
-      // The guard released even though the work threw.
-      expect(inFlightCount()).toBe(0);
-    } finally {
-      clearUpdateHold();
-    }
-  });
-});
-
-describe("runAutoUpdateIfDue（每日自动更新）", () => {
-  // 内存 SQLite 真读写设置、fake Date 钉北京钟；更新视图和更新助手客户端 mock 掉
-  // （runAutoUpdateIfDue 是动态 import 它们的，vi.doMock 可以顶掉）。
-  const prevPg = process.env.MEDIA_TRACK_POSTGRES_URL;
-  const TAG = "v2026.10.02";
-  const idle = {
-    phase: "idle",
-    targetTag: null,
-    fromCommit: null,
-    startedAt: null,
-    finishedAt: null,
-    message: "",
-    logTail: "",
-  };
-  let updater: Record<string, unknown> | null;
-  let available: { tag: string; commit: string } | null;
-  const loadUpdateView = vi.fn();
-  const requestUpdate = vi.fn();
-  let rt: typeof import("./workflow-runtime");
-
-  const boot = async (settings: Record<string, string>, beijingISO: string) => {
-    updater = { ...idle };
-    available = { tag: TAG, commit: "c".repeat(40) };
-    loadUpdateView.mockReset();
-    loadUpdateView.mockImplementation(async () => ({ available, updater, updaterInstalled: true }));
-    requestUpdate.mockReset();
-    requestUpdate.mockImplementation(async () => ({ ok: true }));
-    process.env.MEDIA_TRACK_SQLITE_PATH = ":memory:";
-    delete process.env.MEDIA_TRACK_POSTGRES_URL;
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(`${beijingISO}:00.000+08:00`));
-    vi.resetModules();
-    vi.doMock("./update-view-server", () => ({ loadUpdateView }));
-    vi.doMock("./updater-client", async () => ({
-      ...(await vi.importActual<typeof import("./updater-client")>("./updater-client")),
-      requestUpdate,
-    }));
-    rt = await import("./workflow-runtime");
-    const repository = rt.getWorkflowRepository();
-    for (const [key, value] of Object.entries(settings)) {
-      await repository.setSetting(key, value);
-    }
-    return repository;
-  };
-  const at = (beijingISO: string) => vi.setSystemTime(new Date(`${beijingISO}:00.000+08:00`));
-  const ON = { auto_update_enabled: "1" };
-
-  afterEach(async () => {
-    vi.useRealTimers();
-    vi.doUnmock("./update-view-server");
-    vi.doUnmock("./updater-client");
-    delete process.env.MEDIA_TRACK_SQLITE_PATH;
-    delete process.env.MEDIA_TRACK_DESKTOP;
-    delete process.env.MEDIA_TRACK_DEMO_MODE;
-    if (prevPg !== undefined) process.env.MEDIA_TRACK_POSTGRES_URL = prevPg;
-    const { clearUpdateHold } = await import("./update-hold");
-    clearUpdateHold();
-    vi.resetModules();
-  });
-
-  it("does nothing when switched off, without even reading the release list", async () => {
-    const repository = await boot({}, "2026-10-03T05:00");
-    // The worker asks every 3 s and the switch is off by default: one settings read, no more.
-    const getSetting = vi.spyOn(repository, "getSetting");
-    await rt.runAutoUpdateIfDue();
-    expect(getSetting.mock.calls).toEqual([["auto_update_enabled"]]);
-    expect(loadUpdateView).not.toHaveBeenCalled();
-    expect(requestUpdate).not.toHaveBeenCalled();
-  });
-
-  it("waits for the set time (default 04:00) and looks at GitHub only once it has passed", async () => {
-    const repository = await boot(ON, "2026-10-03T03:59");
-    await rt.runAutoUpdateIfDue();
-    expect(loadUpdateView).not.toHaveBeenCalled();
-    expect(await repository.getSetting("auto_update_last_attempt")).toBeNull();
-    at("2026-10-03T04:00");
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).toHaveBeenCalledTimes(1);
-    expect(requestUpdate).toHaveBeenCalledWith(TAG);
-  });
-
-  it("honours the configured hour, and falls back to 04:00 for a malformed one", async () => {
-    await boot({ ...ON, auto_update_time: "13:00" }, "2026-10-03T12:59");
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).not.toHaveBeenCalled();
-    at("2026-10-03T13:00");
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).toHaveBeenCalledTimes(1);
-
-    for (const bad of ["99:99", "13:30"]) {
-      await boot({ ...ON, auto_update_time: bad }, "2026-10-03T04:05");
-      await rt.runAutoUpdateIfDue();
-      expect(requestUpdate).toHaveBeenCalledTimes(1);
-    }
-  });
-
-  it("asks at most once per Beijing day, whatever the outcome, and again the next day", async () => {
-    const repository = await boot(ON, "2026-10-03T04:05");
-    await rt.runAutoUpdateIfDue();
-    await rt.runAutoUpdateIfDue();
-    at("2026-10-03T23:59");
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).toHaveBeenCalledTimes(1);
-    expect(loadUpdateView).toHaveBeenCalledTimes(1);
-    expect(await repository.getSetting("auto_update_last_attempt")).toBe("2026-10-03");
-    at("2026-10-04T04:00");
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).toHaveBeenCalledTimes(2);
-  });
-
-  it("uses up the day even when there is nothing to update to, or the updater does not answer", async () => {
-    const repository = await boot(ON, "2026-10-03T04:05");
-    available = null;
-    await rt.runAutoUpdateIfDue();
-    expect(await repository.getSetting("auto_update_last_attempt")).toBe("2026-10-03");
-    available = { tag: TAG, commit: "c".repeat(40) };
-    await rt.runAutoUpdateIfDue(); // same day: no second look
-    expect(requestUpdate).not.toHaveBeenCalled();
-    at("2026-10-04T04:05");
-    updater = null;
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).not.toHaveBeenCalled();
-    expect(await repository.getSetting("auto_update_last_attempt")).toBe("2026-10-04");
-  });
-
-  it.each([
-    ["an update is already running", { phase: "building" }],
-    ["a checkout is waiting to be restored", { phase: "failed", pendingRestore: true }],
-    ["a rollback needs a person", { phase: "failed", needsManualRecovery: true }],
-    ["the deploy folder was changed by hand", { phase: "failed", servingUnknown: true }],
-  ])("does not start while %s", async (_name, status) => {
-    const repository = await boot(ON, "2026-10-03T04:05");
-    updater = { ...idle, ...status };
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).not.toHaveBeenCalled();
-    expect(await repository.getSetting("auto_update_last_attempt")).toBe("2026-10-03");
-  });
-
-  it("does not start while this web process is holding new tasks for an update", async () => {
-    await boot(ON, "2026-10-03T04:05");
-    const { setUpdateHold } = await import("./update-hold");
-    setUpdateHold(Date.now(), 60_000);
-    await rt.runAutoUpdateIfDue();
-    expect(requestUpdate).not.toHaveBeenCalled();
-  });
-
-  it("does nothing on desktop or in demo mode", async () => {
-    const repository = await boot(ON, "2026-10-03T04:05");
-    process.env.MEDIA_TRACK_DESKTOP = "1";
-    await rt.runAutoUpdateIfDue();
-    delete process.env.MEDIA_TRACK_DESKTOP;
-    process.env.MEDIA_TRACK_DEMO_MODE = "1";
-    await rt.runAutoUpdateIfDue();
-    expect(loadUpdateView).not.toHaveBeenCalled();
-    expect(requestUpdate).not.toHaveBeenCalled();
-    expect(await repository.getSetting("auto_update_last_attempt")).toBeNull();
-  });
-
-  it("a refused request does not count as a failed update", async () => {
-    const repository = await boot(ON, "2026-10-03T04:05");
-    requestUpdate.mockImplementation(async () => ({ ok: false, reason: "busy" }));
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      await rt.runAutoUpdateIfDue();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("busy"));
-    } finally {
-      warn.mockRestore();
-    }
-    expect(await repository.getSetting("auto_update_fail_streak")).toBeNull();
-  });
-
-  describe("two failures on the same release stop it", () => {
-    const failed = (finishedAt: string, tag = TAG) => ({
-      ...idle,
-      phase: "rolled_back",
-      targetTag: tag,
-      finishedAt,
-    });
-    const streak = async (repository: { getSetting(k: string): Promise<string | null> }) => {
-      const raw = await repository.getSetting("auto_update_fail_streak");
-      return raw ? (JSON.parse(raw) as { tag: string; count: number }) : null;
-    };
-
-    it("tries again after the first failure, and gives up after the second", async () => {
-      const repository = await boot(ON, "2026-10-03T04:05");
-      await rt.runAutoUpdateIfDue(); // day 1: first attempt
-      expect(requestUpdate).toHaveBeenCalledTimes(1);
-
-      updater = failed("2026-10-02T20:20:00.000Z");
-      at("2026-10-04T04:05");
-      await rt.runAutoUpdateIfDue(); // day 2: sees failure 1, tries again
-      expect(await streak(repository)).toMatchObject({ tag: TAG, count: 1 });
-      expect(requestUpdate).toHaveBeenCalledTimes(2);
-
-      updater = failed("2026-10-03T20:20:00.000Z");
-      at("2026-10-05T04:05");
-      await rt.runAutoUpdateIfDue(); // day 3: sees failure 2, stops
-      expect(await streak(repository)).toMatchObject({ tag: TAG, count: 2 });
-      expect(requestUpdate).toHaveBeenCalledTimes(2);
-
-      at("2026-10-06T04:05");
-      await rt.runAutoUpdateIfDue(); // still stopped on later days
-      expect(requestUpdate).toHaveBeenCalledTimes(2);
-    });
-
-    it("counts one failed attempt once, however many days pass without a new attempt", async () => {
-      const repository = await boot(ON, "2026-10-03T04:05");
-      updater = failed("2026-10-02T20:20:00.000Z");
-      // Day 1 and day 2 both skip (a person's own deploy is under way), then it clears.
-      updater = { ...updater, servingUnknown: true };
-      await rt.runAutoUpdateIfDue();
-      at("2026-10-04T04:05");
-      await rt.runAutoUpdateIfDue();
-      updater = failed("2026-10-02T20:20:00.000Z");
-      at("2026-10-05T04:05");
-      await rt.runAutoUpdateIfDue();
-      expect(await streak(repository)).toMatchObject({ tag: TAG, count: 1 });
-      expect(requestUpdate).toHaveBeenCalledTimes(1);
-    });
-
-    it("a newer release is tried again after the older one gave up", async () => {
-      const repository = await boot(
-        { ...ON, auto_update_fail_streak: JSON.stringify({ tag: TAG, count: 2, at: "x" }) },
-        "2026-10-03T04:05",
-      );
-      await rt.runAutoUpdateIfDue();
-      expect(requestUpdate).not.toHaveBeenCalled();
-      available = { tag: "v2026.10.03", commit: "d".repeat(40) };
-      updater = failed("2026-10-02T20:20:00.000Z");
-      at("2026-10-04T04:05");
-      await rt.runAutoUpdateIfDue();
-      expect(requestUpdate).toHaveBeenCalledWith("v2026.10.03");
-      expect(await streak(repository)).toMatchObject({ tag: TAG, count: 2 });
-    });
-
-    it("an empty or corrupt streak counts as none", async () => {
-      await boot({ ...ON, auto_update_fail_streak: "{oops" }, "2026-10-03T04:05");
-      await rt.runAutoUpdateIfDue();
-      expect(requestUpdate).toHaveBeenCalledTimes(1);
-      await boot({ ...ON, auto_update_fail_streak: "" }, "2026-10-03T04:05");
-      await rt.runAutoUpdateIfDue();
-      expect(requestUpdate).toHaveBeenCalledTimes(1);
-    });
-  });
-});
-
 describe("queueing on a drive whose login died names that drive's brand", () => {
   // 在内存 SQLite 里绑一块已冻结的 123 网盘；这两个入口在碰网络之前就会查冻结。
   const prevPg = process.env.MEDIA_TRACK_POSTGRES_URL;
@@ -1529,14 +1197,14 @@ describe("queueing on a drive whose login died names that drive's brand", () => 
     rt = await import("./workflow-runtime");
     const repository = rt.getWorkflowRepository();
     await repository.upsertConnectedStorage({
-      id: "cs_pan123_1",
+      id: "cs_quark_1",
       accountId: "acct_default",
-      provider: "pan123",
+      provider: "quark",
       providerUid: "1",
       payload: {},
       createdAt: "2026-09-30T00:00:00.000Z",
     });
-    await repository.setConnectedStorageStatus("cs_pan123_1", "frozen", "PAN123_AUTH_FAILED: 未登录", "2026-09-30T00:00:00.000Z");
+    await repository.setConnectedStorageStatus("cs_quark_1", "frozen", "QUARK_AUTH_FAILED: 未登录", "2026-09-30T00:00:00.000Z");
   });
 
   afterEach(() => {
@@ -1546,10 +1214,10 @@ describe("queueing on a drive whose login died names that drive's brand", () => 
     vi.resetModules();
   });
 
-  it("asks to re-scan the same 123网盘, not a 115", async () => {
-    const refusal = { status: "unsupported", message: "该网盘已掉线，请重新扫码绑定同一个123网盘后再获取。" };
-    expect(await rt.queueCandidateSeries("tmdb_tv_1_s1", "cs_pan123_1")).toEqual(refusal);
-    expect(await rt.queueCandidateTracking("tmdb_tv_1_s1", "cs_pan123_1")).toEqual(refusal);
+  it("asks to re-scan the same 夸克网盘, not a 115", async () => {
+    const refusal = { status: "unsupported", message: "该网盘已掉线，请重新扫码绑定同一个夸克网盘后再获取。" };
+    expect(await rt.queueCandidateSeries("tmdb_tv_1_s1", "cs_quark_1")).toEqual(refusal);
+    expect(await rt.queueCandidateTracking("tmdb_tv_1_s1", "cs_quark_1")).toEqual(refusal);
   });
 });
 

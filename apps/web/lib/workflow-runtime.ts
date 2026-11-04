@@ -31,6 +31,9 @@ import {
   FREE_LLM_PRESET,
   isFreeLlmPreset,
   isBlankEnvValue,
+  libraryCategoryOf,
+  legacyMediaLibraryFolderName,
+  mediaLibraryFolderName,
   llmConfigError,
   formatDailyDigestPushText,
   scheduledDigestItems,
@@ -64,12 +67,7 @@ import {
   getStorageBrand,
   isRegisteredStorageProvider,
   allowedResourceTypesForProviders,
-  parseCloudDriveUid,
-  parseTianyiUid,
-  UC_PROFILE,
-  parsePan123Uid,
-  generateGuangYaDeviceId,
-  GuangYaClient,
+  parseQuarkUid,
   isRunOrItsSeasonRecord,
   type QueueClaimOptions,
   type ResolveAccountWorkerContext,
@@ -94,14 +92,13 @@ import {
   type WorkflowScope,
   type MediaSearchCandidate,
   type MediaTitle,
+  type LibraryCategory,
   type NotificationEvent,
   type ResourceProvider,
   type ResourceType,
   type SeasonMetadataSync,
   type StagingJanitorDrive,
   type StorageExecutor,
-  type TianyiSession,
-  type TianyiQrSession,
   type TrackedSeason,
   type TrackedSeasonStatusView,
   type VerifiedFile,
@@ -116,18 +113,14 @@ import { findDemoCandidateById, findDemoCandidateByTmdbId } from "./demo-candida
 import { seedDemoWorkflowRepository } from "./demo-workflow";
 import { resolveRegistration, deriveBootstrapState, canManageAccounts } from "./account-bootstrap";
 import { isDemoMode } from "./demo-mode";
-import { isUpdateHoldActive, whileInFlight } from "./update-hold";
-import { DEFAULT_AUTO_UPDATE_TIME, isAutoUpdateTime, shouldAutoUpdate } from "./auto-update-schedule";
-
-/** Checked by the workflow package right before each claim or patrol reservation, not
- *  only at entry: the updater can take the hold while a tick is still setting up. */
-const mayStartRun = () => !isUpdateHoldActive(Date.now());
-
-/** True while the updater holds new work before a container swap. Lets server actions
- *  (e.g. importForeignWorkAction) refuse upfront without importing update-hold directly. */
-export function isUpdateInProgress(): boolean {
-  return isUpdateHoldActive(Date.now());
-}
+import {
+  DEFAULT_EMBY_LIBRARY_NAMES,
+  episodesInEmby,
+  movieInEmby,
+  refreshEmbyLibrary,
+  type EmbyConfig,
+  type EmbyLibraryNames,
+} from "./emby-client";
 
 export type CandidateTrackingRequestResult =
   | {
@@ -471,7 +464,7 @@ export function isCookieSecure(request: {
 }
 
 /** Brand-agnostic custom media-library directory NAMES, read from env and applied
- *  to every drive's connect-time provisioning (115 / 夸克 / 光鸭 all funnel through
+ *  to every drive's connect-time provisioning (115 / 夸克 both funnel through
  *  provisionCategoryDirs). Names only — never CIDs, and a blank value is omitted so
  *  it falls back to the brand default downstream. The root therefore can never
  *  collapse to the account root, so a drive's write scope stays bounded to its own
@@ -480,9 +473,16 @@ export function customDirNamesFromEnv(env: NodeJS.ProcessEnv): {
   rootName?: string;
   moviesName?: string;
   tvName?: string;
+  varietyName?: string;
   animeName?: string;
 } {
-  const opts: { rootName?: string; moviesName?: string; tvName?: string; animeName?: string } = {};
+  const opts: {
+    rootName?: string;
+    moviesName?: string;
+    tvName?: string;
+    varietyName?: string;
+    animeName?: string;
+  } = {};
   const pick = (raw: string | undefined): string | undefined => {
     const trimmed = raw?.trim();
     return trimmed ? trimmed : undefined;
@@ -493,6 +493,8 @@ export function customDirNamesFromEnv(env: NodeJS.ProcessEnv): {
   if (movies) opts.moviesName = movies;
   const tv = pick(env.MEDIA_TRACK_LIBRARY_TV_DIR);
   if (tv) opts.tvName = tv;
+  const variety = pick(env.MEDIA_TRACK_LIBRARY_VARIETY_DIR);
+  if (variety) opts.varietyName = variety;
   const anime = pick(env.MEDIA_TRACK_LIBRARY_ANIME_DIR);
   if (anime) opts.animeName = anime;
   return opts;
@@ -510,16 +512,6 @@ export class UnauthenticatedAccountError extends Error {
   constructor(message = "未登录，请先登录后再操作。") {
     super(message);
     this.name = "UnauthenticatedAccountError";
-  }
-}
-
-/** Thrown when a drive mutation is refused because an update is about to swap the web
- *  container. Rechecked INSIDE the in-flight guard so the updater's busy check cannot miss
- *  it: the caller turns it into a "try again after the update" message. */
-export class UpdateInProgressError extends Error {
-  constructor(message = "正在更新，更新完成后再试。") {
-    super(message);
-    this.name = "UpdateInProgressError";
   }
 }
 
@@ -1026,12 +1018,16 @@ export function buildAccountContextResolver(): ResolveAccountWorkerContext {
       llmConfig,
       ...(assrtToken === undefined ? {} : { assrtToken }),
       titleResearch,
+      emby: (input) => resolveEmbyEpisodes({ accountId, ...input }),
+      embyMovie: (input) => resolveMovieInEmby({ accountId, ...input }),
+      afterRun: () => refreshEmbyForAccount(accountId),
       ...(jevJudge === undefined ? {} : { jevJudge }),
       agentMemory,
       ...(preferredLanguage === undefined ? {} : { preferredLanguage }),
       ...(qualityPreference === undefined ? {} : { qualityPreference }),
       storageParentDirectoryId: parents.tv,
       animeStorageParentDirectoryId: parents.anime,
+      varietyStorageParentDirectoryId: parents.variety,
       moviesParentDirectoryId: parents.movies,
       ...(drives.length > 0 ? { drives } : {}),
     };
@@ -1100,9 +1096,10 @@ export async function resolveAccountActiveDrives(
           }
           const is115 = creds.provider === "pan115";
           const tv = creds.tvCid || (is115 ? storageParentDirectoryId() : "");
+          const variety = creds.varietyCid || creds.tvCid || (is115 ? varietyParentDirectoryId() : "");
           const anime = creds.animeCid || creds.tvCid || (is115 ? animeParentDirectoryId() : "");
           const movies = creds.moviesCid || (is115 ? moviesParentDirectoryId() : "");
-          if (!tv || !anime || !movies) {
+          if (!tv || !variety || !anime || !movies) {
             return null;
           }
           const [storage, space] = await Promise.all([
@@ -1115,7 +1112,7 @@ export async function resolveAccountActiveDrives(
             provider: creds.provider,
             label: row.label?.trim() ? `${brandLabel}（${row.label.trim()}）` : brandLabel,
             storage,
-            parents: { tv, anime, movies },
+            parents: { tv, anime, movies, variety },
             space,
           };
         } catch (error) {
@@ -1168,13 +1165,7 @@ export function __resetPanSouHealthCacheForTests(): void {
  *  filter and claim callback) so several runs can go at once, never two on one drive;
  *  without it the oldest claimable run is taken, as before. */
 export async function runNextQueuedWorkflow(claim?: QueueClaimOptions) {
-  // An update is about to replace this process: start nothing new. Queued runs stay
-  // queued and run on the new version.
-  if (isUpdateHoldActive(Date.now())) {
-    return { status: "idle" as const };
-  }
-  // In flight for the updater's busy check, from here to the claim it guards.
-  return whileInFlight(() => runNextQueuedWorkflowNow(claim));
+  return runNextQueuedWorkflowNow(claim);
 }
 
 async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
@@ -1217,9 +1208,9 @@ async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
     ...quality,
     storageParentDirectoryId: parents.tv,
     animeStorageParentDirectoryId: parents.anime,
+    varietyStorageParentDirectoryId: parents.variety,
     resolveAccountContext,
     onAuthErrorFreeze,
-    mayStartRun,
     ...claimOption,
   });
   if (type2.status !== "idle") {
@@ -1239,9 +1230,9 @@ async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
     ...quality,
     storageParentDirectoryId: parents.tv,
     animeStorageParentDirectoryId: parents.anime,
+    varietyStorageParentDirectoryId: parents.variety,
     resolveAccountContext,
     onAuthErrorFreeze,
-    mayStartRun,
     ...claimOption,
   });
   if (series.status !== "idle") {
@@ -1262,7 +1253,6 @@ async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
     moviesParentDirectoryId: parents.movies,
     resolveAccountContext,
     onAuthErrorFreeze,
-    mayStartRun,
     ...claimOption,
   });
   if (movie.status !== "idle") {
@@ -1282,10 +1272,10 @@ async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
     ...quality,
     storageParentDirectoryId: parents.tv,
     animeStorageParentDirectoryId: parents.anime,
+    varietyStorageParentDirectoryId: parents.variety,
     moviesParentDirectoryId: parents.movies,
     resolveAccountContext,
     onAuthErrorFreeze,
-    mayStartRun,
     ...claimOption,
     // A work with 待换 episodes skips the patrol, where TMDB sync normally happens.
     ...syncOption(),
@@ -1307,7 +1297,6 @@ async function runNextQueuedWorkflowNow(claim: QueueClaimOptions | undefined) {
     ...quality,
     resolveAccountContext,
     onAuthErrorFreeze,
-    mayStartRun,
     ...claimOption,
   });
 }
@@ -1449,14 +1438,6 @@ export async function getTmdbAccesses(
   return accesses;
 }
 
-/** True when the app runs inside the Electron desktop shell (server-launch sets
- *  MEDIA_TRACK_DESKTOP=1). Unlike the docker/compose stack, the desktop shell
- *  does NOT bundle a PanSou container — so the settings copy points the user at
- *  the self-host tutorial instead of claiming "内置、开箱即用". */
-export function resolveIsDesktop(env: Record<string, string | undefined> = process.env): boolean {
-  return env.MEDIA_TRACK_DESKTOP === "1";
-}
-
 export const PANSOU_BASE_URL_SETTING_KEY = "pansou_base_url";
 
 /** 自建搜索源的最新健康结论。取值只有三种:`"ok"` / `"unhealthy"` / `""`(未配或
@@ -1491,6 +1472,77 @@ export async function getPanSouBaseUrl(
 
 export const PROWLARR_BASE_URL_SETTING_KEY = "prowlarr_base_url";
 export const PROWLARR_API_KEY_SETTING_KEY = "prowlarr_api_key";
+
+export const EMBY_BASE_URL_SETTING_KEY = "emby_base_url";
+export const EMBY_API_KEY_SETTING_KEY = "emby_api_key";
+export const EMBY_LIBRARY_NAMES_SETTING_KEY = "emby_library_names";
+
+export function parseEmbyLibraryNames(raw: string | null): EmbyLibraryNames {
+  const names: EmbyLibraryNames = { ...DEFAULT_EMBY_LIBRARY_NAMES };
+  if (!raw) return names;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    for (const key of ["movies", "tv", "variety", "anime"] as const) {
+      const value = parsed[key];
+      if (typeof value === "string" && value.trim()) names[key] = value.trim();
+    }
+  } catch {
+    // hand-edited garbage falls back to defaults
+  }
+  return names;
+}
+
+/** The account's Emby connection, or null when base URL / API key is unset. */
+export async function getEmbyConfig(settings: {
+  getSetting(key: string): Promise<string | null>;
+}): Promise<EmbyConfig | null> {
+  const [baseUrl, apiKey, namesRaw] = await Promise.all([
+    settings.getSetting(EMBY_BASE_URL_SETTING_KEY),
+    settings.getSetting(EMBY_API_KEY_SETTING_KEY),
+    settings.getSetting(EMBY_LIBRARY_NAMES_SETTING_KEY),
+  ]);
+  const base = baseUrl?.trim();
+  const key = apiKey?.trim();
+  if (!base || !key) return null;
+  return { baseUrl: base, apiKey: key, libraryNames: parseEmbyLibraryNames(namesRaw) };
+}
+
+export async function resolveAccountEmbyConfig(
+  accountId: string = DEFAULT_ACCOUNT_ID,
+): Promise<EmbyConfig | null> {
+  return getEmbyConfig(getAccountScopedSettings(accountId));
+}
+
+/** Episodes already in Emby for this title. Fail-open → [] on any error. */
+async function resolveEmbyEpisodes(input: {
+  accountId: string;
+  title: MediaTitle;
+  seasons: number[];
+}): Promise<string[]> {
+  const config = await resolveAccountEmbyConfig(input.accountId);
+  if (!config) return [];
+  return episodesInEmby(config, {
+    tmdbId: input.title.tmdbId,
+    category: libraryCategoryOf(input.title),
+  });
+}
+
+/** Whether this film is already in Emby. Fail-open → false. */
+async function resolveMovieInEmby(input: { accountId: string; title: MediaTitle }): Promise<boolean> {
+  const config = await resolveAccountEmbyConfig(input.accountId);
+  if (!config) return false;
+  return movieInEmby(config, {
+    tmdbId: input.title.tmdbId,
+    category: libraryCategoryOf(input.title),
+  });
+}
+
+/** One library scan after a run landed files. No-op when Emby is unconfigured. */
+export async function refreshEmbyForAccount(accountId: string): Promise<void> {
+  const config = await resolveAccountEmbyConfig(accountId);
+  if (!config) return;
+  await refreshEmbyLibrary(config);
+}
 
 /** The user's configured Prowlarr indexer aggregator (Settings → 资源提供商).
  *  Each field undefined when unset/blank → getWorkerResourceProvider skips it. */
@@ -1844,6 +1896,23 @@ async function pushNotificationsSince(
       const drives = await targetRepository.listConnectedStorages(accountId);
       const sourceLabels = resolveDriveSourceLabels(entries, drives);
 
+      // Automation (SmartStrm): queue one a_task per landed folder, debounced by
+      // the background worker. Best-effort — a webhook problem never fails a push.
+      try {
+        const { enqueueAutomationForLandings } = await import("./automation-webhook");
+        await enqueueAutomationForLandings({
+          accountId,
+          entries: entries.map((entry) => ({
+            connectedStorageId: entry.connectedStorageId,
+            report: entry.notification.report,
+          })),
+        });
+      } catch (error) {
+        console.error(
+          `[automation] enqueue failed for ${accountId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+
       const notifications = entries.map((entry) => entry.notification);
       // A scheduled sweep touches many shows; collapse this account's into ONE
       // digest. User-triggered events stay per-resource — each its own message.
@@ -2015,102 +2084,6 @@ export function beijingDateTime(): { date: string; hhmm: string } {
   return { date: `${get("year")}-${get("month")}-${get("day")}`, hhmm: `${get("hour")}:${get("minute")}` };
 }
 
-export const AUTO_UPDATE_ENABLED_SETTING_KEY = "auto_update_enabled";
-export const AUTO_UPDATE_TIME_SETTING_KEY = "auto_update_time";
-const AUTO_UPDATE_LAST_ATTEMPT_SETTING_KEY = "auto_update_last_attempt";
-export const AUTO_UPDATE_FAIL_STREAK_SETTING_KEY = "auto_update_fail_streak";
-
-/** The auto-update switch and its hour (Beijing time). Off unless explicitly turned on;
- *  a missing or malformed hour (anything but a whole hour) reads as the 04:00 default. */
-export async function getAutoUpdateSettings(
-  repository: { getSetting(key: string): Promise<string | null> },
-): Promise<{ enabled: boolean; time: string }> {
-  return { enabled: await isAutoUpdateEnabled(repository), time: await getAutoUpdateTime(repository) };
-}
-
-async function isAutoUpdateEnabled(repository: { getSetting(key: string): Promise<string | null> }): Promise<boolean> {
-  return (await repository.getSetting(AUTO_UPDATE_ENABLED_SETTING_KEY))?.trim() === "1";
-}
-
-async function getAutoUpdateTime(repository: { getSetting(key: string): Promise<string | null> }): Promise<string> {
-  const time = (await repository.getSetting(AUTO_UPDATE_TIME_SETTING_KEY))?.trim();
-  return time && isAutoUpdateTime(time) ? time : DEFAULT_AUTO_UPDATE_TIME;
-}
-
-/** Failed attempts at one release. `at` is when the last counted attempt ended: one failed
- *  attempt is counted once, however many days its status stays on the updater. */
-interface AutoUpdateFailStreak {
-  tag: string;
-  count: number;
-  at: string;
-}
-
-function parseAutoUpdateFailStreak(raw: string | null): AutoUpdateFailStreak | null {
-  if (!raw?.trim()) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<AutoUpdateFailStreak> | null;
-    if (
-      parsed &&
-      typeof parsed.tag === "string" &&
-      typeof parsed.count === "number" &&
-      Number.isInteger(parsed.count) &&
-      parsed.count > 0
-    ) {
-      return { tag: parsed.tag, count: parsed.count, at: typeof parsed.at === "string" ? parsed.at : "" };
-    }
-  } catch {
-    // A hand-edited or damaged value counts as no failures.
-  }
-  return null;
-}
-
-/** Daily auto-update. The worker calls this every tick (3 s): with the switch off it reads
- *  one setting and returns, and it looks at GitHub and the updater once a day, after the
- *  set hour. The day is used up whatever the outcome (no update, offline, a state that says
- *  wait): the next look is tomorrow. */
-export async function runAutoUpdateIfDue(): Promise<void> {
-  if (isDemoMode() || resolveIsDesktop()) return;
-  const repository = getWorkflowRepository();
-  // Off by default and asked every tick: read the switch alone first.
-  if (!(await isAutoUpdateEnabled(repository))) return;
-  const time = await getAutoUpdateTime(repository);
-  const { date, hhmm } = beijingDateTime();
-  const lastAttemptDate = (await repository.getSetting(AUTO_UPDATE_LAST_ATTEMPT_SETTING_KEY))?.trim() ?? null;
-  if (hhmm < time || lastAttemptDate === date) return;
-  await repository.setSetting(AUTO_UPDATE_LAST_ATTEMPT_SETTING_KEY, date);
-  // Dynamic: update-view-server imports this module.
-  const { loadUpdateView } = await import("./update-view-server");
-  const { requestUpdate } = await import("./updater-client");
-  const view = await loadUpdateView();
-  if (!view.updater || !view.available) return;
-  const tag = view.available.tag;
-  let failStreak = parseAutoUpdateFailStreak(await repository.getSetting(AUTO_UPDATE_FAIL_STREAK_SETTING_KEY));
-  // The last attempt at this same release failed: count it (once) before deciding.
-  if (view.updater.targetTag === tag && (view.updater.phase === "rolled_back" || view.updater.phase === "failed")) {
-    const at = view.updater.finishedAt ?? view.updater.startedAt ?? "";
-    if (!failStreak || failStreak.tag !== tag) {
-      failStreak = { tag, count: 1, at };
-    } else if (failStreak.at !== at) {
-      failStreak = { tag, count: failStreak.count + 1, at };
-    }
-    await repository.setSetting(AUTO_UPDATE_FAIL_STREAK_SETTING_KEY, JSON.stringify(failStreak));
-  }
-  const due = shouldAutoUpdate({
-    enabled: true,
-    time,
-    now: { date, hhmm },
-    lastAttemptDate,
-    available: tag,
-    failStreak,
-    updater: view.updater,
-    updateHoldActive: isUpdateHoldActive(Date.now()),
-  });
-  if (!due) return;
-  const result = await requestUpdate(tag);
-  if (result.ok) console.log(`[auto-update] started ${tag}`);
-  else console.warn(`[auto-update] ${tag} not started: ${result.reason}`);
-}
-
 /**
  * 每日巡检（per-slot 认领 + 合并补跑）。任何触发源（worker tick / cron / 手动）都
  * 打这里：每次找出「已到点且今天未认领」的时间点，一次性全部认领并只跑一次 sweep
@@ -2120,19 +2093,12 @@ export async function runAutoUpdateIfDue(): Promise<void> {
  */
 type ScheduledType3Result = {
   outcomes: Awaited<ReturnType<typeof runScheduledType3Monitoring>>;
-  skipped?: "already_swept_today" | "before_scheduled_time" | "update_in_progress";
+  skipped?: "already_swept_today" | "before_scheduled_time";
   scheduledFor?: string;
 };
 
 export async function runScheduledType3(options?: { force?: boolean }): Promise<ScheduledType3Result> {
-  // Checked before any slot is claimed, so a scheduled patrol skipped here still runs
-  // on the new version once the update is done.
-  if (isUpdateHoldActive(Date.now())) {
-    return { skipped: "update_in_progress", outcomes: [] };
-  }
-  // In flight for the updater's busy check: reservations and staging cleanup must not
-  // be cut by a swap. The manual 立即巡检 and cron routes come through here too.
-  return whileInFlight(() => runScheduledType3Now(options));
+  return runScheduledType3Now(options);
 }
 
 async function runScheduledType3Now(options?: { force?: boolean }): Promise<ScheduledType3Result> {
@@ -2181,9 +2147,6 @@ async function runScheduledType3Now(options?: { force?: boolean }): Promise<Sche
     );
   }
   let result: Awaited<ReturnType<typeof runScheduledType3Monitoring>>;
-  // Set when an update hold stopped a show from being reserved mid-sweep: the sweep is
-  // then not complete, and its slots must stay open for the new version.
-  let heldBack = false;
   try {
     await hydratePan115CookieFromDb();
     const sync = tmdbSeasonMetadataSync();
@@ -2200,48 +2163,26 @@ async function runScheduledType3Now(options?: { force?: boolean }): Promise<Sche
       ...(qualityPreference === undefined ? {} : { qualityPreference }),
       storageParentDirectoryId: parents.tv,
       animeStorageParentDirectoryId: parents.anime,
+      varietyStorageParentDirectoryId: parents.variety,
       moviesParentDirectoryId: parents.movies,
       staleActiveRunTimeoutMs: 30 * 60 * 1000,
       maxConcurrentRuns: await getPatrolConcurrency(repository),
       resolveDriveId: defaultDriveIdOf,
       resolveAccountContext: buildAccountContextResolver(),
       onAuthErrorFreeze: (id, reason) => freezeConnectedStorage(id, reason),
-      mayStartRun: () => {
-        const allowed = mayStartRun();
-        if (!allowed) heldBack = true;
-        return allowed;
-      },
       ...(sync ? { syncSeasonMetadata: sync } : {}),
     });
-    // Release this call's slots (as on a failure) and do not stamp a completed sweep,
-    // so the new version patrols the rest today. Seasons that did run are only re-checked.
-    const stopForUpdate = async () => {
-      if (claimedNow.length > 0) {
-        await repository.setSetting(
-          LAST_SWEEP_CLAIMS_SETTING_KEY,
-          JSON.stringify({ date: claimDate, slots: priorClaims }),
-        );
-      }
-      await pushNotificationsSince(repository, startedAt, { sweep: true });
-      return { skipped: "update_in_progress" as const, outcomes: result };
-    };
-    if (heldBack) return await stopForUpdate();
     try {
-      const janitor = await sweepOrphanStagingDirs({
+      await sweepOrphanStagingDirs({
         repository,
         drives: await stagingJanitorDrives(),
         now: new Date().toISOString(),
-        mayStartRun,
       });
-      if (janitor.held) heldBack = true;
     } catch (error) {
       console.error(
         `[patrol] staging janitor failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    // The janitor stopped for an update, or the hold started after both had passed their
-    // checks: either way the new version should run today's sweep, so do not mark it done.
-    if (heldBack || !mayStartRun()) return await stopForUpdate();
     await repository.setSetting(LAST_SWEEP_COMPLETED_AT_SETTING_KEY, new Date().toISOString());
     await pushNotificationsSince(repository, startedAt, { sweep: true });
     return { outcomes: result };
@@ -2309,6 +2250,7 @@ async function stagingJanitorDrives(): Promise<StagingJanitorDrive[]> {
           status: storage.status,
           provider: storage.provider,
           tvCid: storage.tvCid,
+          varietyCid: storage.varietyCid,
           animeCid: storage.animeCid,
           executor: {},
         });
@@ -2321,6 +2263,7 @@ async function stagingJanitorDrives(): Promise<StagingJanitorDrive[]> {
           status: storage.status,
           provider: storage.provider,
           tvCid: storage.tvCid,
+          varietyCid: storage.varietyCid,
           animeCid: storage.animeCid,
           executor: await getWorkerStorageExecutor(account.id, storage.id),
         });
@@ -2503,15 +2446,6 @@ export async function getWorkerResourceProvider(
   return fakeResourceProvider;
 }
 
-/** Opaque credential blob for token-auth brands (authKind "token"):
- *  光鸭 {accessToken,refreshToken,deviceId?}; 天翼 {sessionKey,accessToken,
- *  refreshToken,familySessionKey?}. Deliberately untyped here — each brand's
- *  client validates its own shape downstream. ⚠️ 天翼's durable identity lives at
- *  payload.meta.loginName, NOT in this blob: makeTokenPersister replaces the
- *  payload with blob+meta on every renewal, so a top-level loginName the client
- *  happens to include is transient and must not be relied on. */
-type TokenCredential = Record<string, unknown>;
-
 /** §7: the account's 115 credentials (cookie + category CIDs) from its
  *  connected_storages record. null when the account hasn't connected a 115 yet
  *  (then the worker falls back to the legacy env cookie / env CIDs). */
@@ -2520,82 +2454,247 @@ interface AccountStorageCredentials {
   /** The drive's brand — drives executor/probe/resource dispatch (tree model). */
   provider: string;
   status: "active" | "frozen";
-  /** Cookie credential for cookie-auth brands (115/夸克). Empty for token-auth
-   *  brands (光鸭/天翼), which carry their token blob in `credential` instead. */
+  /** Cookie credential for the drive (both supported brands are cookie-auth). */
   cookie: string;
-  /** Token blob for token-auth brands (光鸭/天翼). null for cookie-auth brands. */
-  credential: TokenCredential | null;
   rootCid: string | null;
   moviesCid: string | null;
   tvCid: string | null;
+  varietyCid: string | null;
   animeCid: string | null;
 }
 
-/** Pull a drive's brand-appropriate credential out of its connected_storage
- *  payload. Cookie brands (115/夸克) store a cookie string; token brands (光鸭/
- *  天翼) store a token blob — routed by the registry's authKind (unregistered
- *  providers fall back to the cookie shape). Returns a presence flag the
- *  resolver uses the SAME way it used a non-empty cookie. */
-function extractStorageCredential(
-  provider: string,
-  payload: unknown,
-): { cookie: string; credential: TokenCredential | null } {
-  const brand = isRegisteredStorageProvider(provider) ? getStorageBrand(provider) : null;
-  if (brand?.authKind === "token") {
-    // Token brands store an opaque credential blob. It counts as "connected" iff
-    // every brand-required key (registry: requiredCredentialKeys) is a non-empty
-    // string — 光鸭 needs accessToken+refreshToken (deviceId optional, rides along
-    // in the blob); 天翼 needs the sessionKey/accessToken/refreshToken trio. Return
-    // the raw blob as-is (the brand client trims/validates the rest downstream);
-    // any required key missing → not-connected, exactly like an empty cookie.
-    const blob = (payload ?? {}) as Record<string, unknown>;
-    // A token brand with no requiredCredentialKeys is a REGISTRY MISCONFIG, not a
-    // connected drive: `[].every(...)` is vacuously true, so without this guard any
-    // payload (even {}) would silently pass. Require a non-empty key list.
-    const requiredKeys = brand.requiredCredentialKeys ?? [];
-    const ok =
-      requiredKeys.length > 0 &&
-      requiredKeys.every((key) => typeof blob[key] === "string" && (blob[key] as string).trim().length > 0);
-    return ok ? { cookie: "", credential: blob } : { cookie: "", credential: null };
+/** Per-drive media tree layout, persisted in `payload.libraryDirs`. Blank names
+ *  fall back to the defaults (影视 / 电影 / 电视剧 / 综艺 / 动漫). */
+export interface LibraryDirNames {
+  rootName?: string;
+  moviesName?: string;
+  tvName?: string;
+  varietyName?: string;
+  animeName?: string;
+  /** Where this drive is mounted inside SmartStrm (e.g. `/115`). Used only when
+   *  building automation storage paths; blank → the brand default. */
+  mountPrefix?: string;
+}
+
+/** The four-shelf names used when a drive has no custom layout. */
+export const DEFAULT_LIBRARY_DIR_NAMES = {
+  rootName: "影视",
+  moviesName: "电影",
+  tvName: "电视剧",
+  varietyName: "综艺",
+  animeName: "动漫",
+} as const;
+
+/** SmartStrm mount fallback when the drive's `mountPrefix` is blank. */
+export function defaultMountPrefix(provider: string): string {
+  return provider === "quark" ? "/quark" : "/115";
+}
+
+function libraryDirNamesFromPayload(payload: unknown): LibraryDirNames {
+  const raw = (payload as { libraryDirs?: unknown } | null)?.libraryDirs;
+  if (!raw || typeof raw !== "object") return {};
+  const source = raw as Record<string, unknown>;
+  const names: LibraryDirNames = {};
+  for (const key of [
+    "rootName",
+    "moviesName",
+    "tvName",
+    "varietyName",
+    "animeName",
+    "mountPrefix",
+  ] as const) {
+    const value = source[key];
+    if (typeof value === "string" && value.trim()) names[key] = value.trim();
   }
-  const cookie = (payload as { cookie?: string } | null)?.cookie?.trim() ?? "";
-  return { cookie, credential: null };
+  return names;
+}
+
+function withLibraryDirNames(payload: unknown, names: LibraryDirNames): unknown {
+  const base = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+  return { ...base, libraryDirs: names };
+}
+
+const LIBRARY_DIR_NAME_MAX = 64;
+
+/** Trim user-supplied names and reject path separators — each value is a single
+ *  directory segment under the drive's media root. Blanks fall back to defaults. */
+function normalizeLibraryDirNames(input: LibraryDirNames): LibraryDirNames {
+  const names: LibraryDirNames = {};
+  for (const key of [
+    "rootName",
+    "moviesName",
+    "tvName",
+    "varietyName",
+    "animeName",
+  ] as const) {
+    const value = input[key]?.trim();
+    if (!value) continue;
+    if (/[\\/]/.test(value)) {
+      throw new Error("目录名不能包含 / 或 \\，请填写单层目录名。");
+    }
+    if (value.length > LIBRARY_DIR_NAME_MAX) {
+      throw new Error(`目录名不能超过 ${LIBRARY_DIR_NAME_MAX} 个字符。`);
+    }
+    names[key] = value;
+  }
+  // The mount prefix is a SmartStrm-side path, not a drive folder: allow slashes,
+  // strip trailing ones, and ensure it is absolute.
+  const mount = input.mountPrefix?.trim();
+  if (mount) {
+    const normalized = `/${mount.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+    if (normalized.length > 128) {
+      throw new Error("SmartStrm 挂载前缀不能超过 128 个字符。");
+    }
+    names.mountPrefix = normalized === "/" ? "" : normalized;
+  }
+  return names;
+}
+
+/** Settings「媒体库目录」: re-resolve/create this drive's four shelf directories
+ *  under the new names and persist both the CIDs and the chosen layout. Existing
+ *  tracked seasons keep their stored directory ids, so old episodes are not moved. */
+export async function saveDriveLibraryDirs(input: {
+  storageId: string;
+  dirs: LibraryDirNames;
+}): Promise<void> {
+  const accountId = await requireAuthenticatedAccountId();
+  const repository = getWorkflowRepository();
+  const drive = (await repository.listConnectedStorages(accountId)).find(
+    (storage) => storage.id === input.storageId && isRegisteredStorageProvider(storage.provider),
+  );
+  if (!drive) {
+    throw new Error("网盘不存在或不属于当前账号。");
+  }
+  const cookie = extractStorageCookie(drive.payload);
+  if (!cookie) {
+    throw new Error("该网盘缺少登录凭证，请重新绑定后再试。");
+  }
+  const names = normalizeLibraryDirNames(input.dirs);
+  const cids = await provisionDriveCategoryDirs(drive.provider, cookie, names);
+  await repository.upsertConnectedStorage({
+    id: drive.id,
+    accountId,
+    provider: drive.provider,
+    providerUid: drive.providerUid,
+    label: drive.label,
+    payload: withLibraryDirNames(drive.payload, names),
+    rootCid: cids.rootCid,
+    moviesCid: cids.moviesCid,
+    tvCid: cids.tvCid,
+    varietyCid: cids.varietyCid,
+    animeCid: cids.animeCid,
+    createdAt: drive.createdAt,
+  });
+}
+
+/** The absolute path of a landed title's folder on ONE drive, as SmartStrm sees
+ *  it: mount prefix + root + shelf + title folder. The title folder is read back
+ *  from the drive so a legacy `Title (Year)` folder (no `{tmdb-N}` suffix) is
+ *  matched instead of guessed. Returns null when the drive is gone. */
+export async function resolveLandedStoragePath(input: {
+  accountId: string;
+  storageId: string;
+  category: LibraryCategory;
+  title: string;
+  year?: number | null;
+  tmdbId: number;
+}): Promise<string | null> {
+  const drive = (await getWorkflowRepository().listConnectedStorages(input.accountId)).find(
+    (storage) => storage.id === input.storageId,
+  );
+  if (!drive) return null;
+  const names = libraryDirNamesFromPayload(drive.payload);
+  const mount = names.mountPrefix ?? defaultMountPrefix(drive.provider);
+  const root = names.rootName ?? DEFAULT_LIBRARY_DIR_NAMES.rootName;
+  const categoryName =
+    input.category === "movies"
+      ? names.moviesName ?? DEFAULT_LIBRARY_DIR_NAMES.moviesName
+      : input.category === "variety"
+        ? names.varietyName ?? DEFAULT_LIBRARY_DIR_NAMES.varietyName
+        : input.category === "anime"
+          ? names.animeName ?? DEFAULT_LIBRARY_DIR_NAMES.animeName
+          : names.tvName ?? DEFAULT_LIBRARY_DIR_NAMES.tvName;
+  const preferred = mediaLibraryFolderName({
+    title: input.title,
+    year: input.year,
+    tmdbId: input.tmdbId,
+  });
+  const legacy = legacyMediaLibraryFolderName({ title: input.title, year: input.year });
+  const categoryCid =
+    input.category === "movies"
+      ? drive.moviesCid
+      : input.category === "variety"
+        ? drive.varietyCid
+        : input.category === "anime"
+          ? drive.animeCid
+          : drive.tvCid;
+  let folder = preferred;
+  if (categoryCid) {
+    try {
+      const executor = await getWorkerStorageExecutor(input.accountId, input.storageId);
+      const children = await executor.listChildDirectories(categoryCid);
+      folder =
+        children.find((child) => child.name === preferred)?.name ??
+        children.find((child) => child.name === legacy)?.name ??
+        children.find((child) => child.name.endsWith(`{tmdb-${input.tmdbId}}`))?.name ??
+        preferred;
+    } catch (error) {
+      // Missing/renamed dirs shouldn't block the webhook: fall back to the name
+      // the run would have created.
+      console.warn(
+        `[automation] could not resolve the title folder on ${input.storageId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  const parts = [mount, root, categoryName, folder]
+    .map((part) => part.replace(/^\/+/, "").replace(/\/+$/, ""))
+    .filter((part) => part.length > 0);
+  return `/${parts.join("/")}`;
+}
+
+/** Manual shelf override (电影 / 电视剧 / 综艺 / 动漫). Future acquisitions route
+ *  to the chosen drive root; already-tracked seasons keep their stored dirs. */
+export async function setTitleLibraryCategory(input: {
+  titleId: string;
+  category: LibraryCategory;
+}): Promise<void> {
+  await requireAuthenticatedAccountId();
+  const updated = await getWorkflowRepository().setMediaTitleLibraryCategory(
+    input.titleId,
+    input.category,
+  );
+  if (!updated) {
+    throw new Error("未找到该作品，可能尚未入库。");
+  }
+}
+
+/** Pull a drive's cookie out of its connected_storage payload. */
+function extractStorageCookie(payload: unknown): string {
+  return (payload as { cookie?: string } | null)?.cookie?.trim() ?? "";
 }
 
 /**
- * Provision a drive's media tree (Mediary Scout/{Movies,TV,Anime}) under the
- * account root and return the CIDs. Uses an UNRESTRICTED bootstrap executor — a
- * fresh drive has no write scope yet, and the scope is meant to come FROM these
- * dirs (the catch-22 that left 115 drives stuck "目录待建"). Bounded, idempotent
- * (find-or-create, no deletes). 115 root and 夸克 root are both "0"; 光鸭 root is
- * ""; 天翼 personal-cloud root is "-11".
+ * Provision a drive's media tree under the account root and return the CIDs.
+ * Uses an UNRESTRICTED bootstrap executor — a fresh drive has no write scope yet,
+ * and the scope is meant to come FROM these dirs (the catch-22 that left drives
+ * stuck "目录待建"). Bounded, idempotent (find-or-create, no deletes). Both
+ * supported brands root at "0".
  */
 async function provisionDriveCategoryDirs(
   provider: string,
   cookie: string,
-  credential: TokenCredential | null,
-): Promise<{ rootCid: string; moviesCid: string; tvCid: string; animeCid: string }> {
-  // Per-brand provisioning root is DATA in the registry ("0"/"0"/""/"-11"), not
-  // logic — one lookup drives every arm below (was hardcoded per branch).
+  names: LibraryDirNames = {},
+): Promise<{ rootCid: string; moviesCid: string; tvCid: string; varietyCid: string; animeCid: string }> {
   const brand = getStorageBrand(provider);
   const baseParentId = brand.provisionRootId;
-  // Dispatch on authKind (registry) so ANY token brand takes the credential path —
-  // a future token brand won't silently fall through to the cookie path. Cookie
-  // brands then split on the family: 115 has its own executor; 阿里云盘族 (夸克/UC)
-  // shares one, so `provider` is passed straight through. Hardcoding "quark" here
-  // (the pre-UC form) dropped a UC drive into the 115 bootstrap — wrong protocol,
-  // and the provision silently failed, leaving the drive with no CIDs.
-  let executor: StorageExecutor;
-  if (brand.authKind === "token") {
-    executor = createExecutorForBrand({ provider, credential: credential ?? {}, scopeCids: [] });
-  } else if (provider === "pan115") {
-    executor = createBootstrapPan115CookieStorageExecutor({ cookie });
-  } else {
-    executor = createExecutorForBrand({ provider, cookie, scopeCids: [] });
-  }
+  const executor: StorageExecutor =
+    provider === "pan115"
+      ? createBootstrapPan115CookieStorageExecutor({ cookie })
+      : createExecutorForBrand({ provider, cookie, scopeCids: [] });
   return provisionCategoryDirs({
     baseParentId,
     ...customDirNamesFromEnv(process.env),
+    ...names,
     storage: {
       listChildDirs: (parentId: string) => executor.listChildDirectories(parentId),
       createDirectory: (dir) => executor.createDirectory(dir),
@@ -2603,73 +2702,8 @@ async function provisionDriveCategoryDirs(
   });
 }
 
-/**
- * Build the persist hook handed to a token-auth executor/probe (光鸭/天翼): when
- * the brand client rotates its credential (光鸭 token refresh on 401; 天翼会话
- * 续期), write the WHOLE refreshed blob back into this drive's connected_storage
- * payload so the next run starts from the fresh credential. Brand-agnostic — the
- * blob is persisted as-is (光鸭 passes {accessToken,refreshToken,deviceId}; 天翼
- * passes {sessionKey,accessToken,refreshToken,familySessionKey,loginName}), with
- * the row's existing `meta` preserved. ⚠️ Invariant: the persister REPLACES the
- * payload with blob+meta, so anything durable that isn't the rotating credential
- * MUST live under `payload.meta` (天翼's durable loginName sits at meta.loginName;
- * a top-level loginName in the renewal blob is transient). An incomplete blob
- * (missing the brand's required keys per extractStorageCredential) is never
- * persisted — it would silently turn the drive into "not connected". Re-reads
- * the row at call time to keep its CIDs/label (mirrors the cookie-refresh upsert
- * in connectGuangYa). Best-effort: a persist failure is logged, not thrown — the
- * in-memory client keeps the new credential for the rest of the run regardless.
- */
-function makeTokenPersister(
-  accountId: string,
-  storageId: string,
-  provider: string,
-): (creds: unknown) => Promise<void> {
-  return async (creds) => {
-    try {
-      const blob = (creds ?? {}) as Record<string, unknown>;
-      const repository = getWorkflowRepository();
-      const drive = (await repository.listConnectedStorages(accountId)).find((s) => s.id === storageId);
-      if (!drive) {
-        console.warn(
-          `[media-track] ${provider} token refresh: drive ${storageId} (account ${accountId}) vanished, skip persist`,
-        );
-        return;
-      }
-      // Guard: never replace the payload with a blob missing the brand's required
-      // keys — a buggy/partial refresh would otherwise silently disconnect the
-      // drive (extractStorageCredential → null: no freeze, no error, just gone).
-      if (!extractStorageCredential(drive.provider, blob).credential) {
-        console.warn(`[media-track] ${provider} token refresh: incomplete blob for ${storageId}, skip persist`);
-        return;
-      }
-      const prevMeta = (drive.payload as { meta?: unknown } | null)?.meta;
-      const payload = {
-        ...blob,
-        ...(prevMeta === undefined ? {} : { meta: prevMeta }),
-      };
-      await repository.upsertConnectedStorage({
-        id: drive.id,
-        accountId,
-        provider: drive.provider,
-        providerUid: drive.providerUid,
-        label: drive.label,
-        payload,
-        rootCid: drive.rootCid,
-        moviesCid: drive.moviesCid,
-        tvCid: drive.tvCid,
-        animeCid: drive.animeCid,
-        createdAt: drive.createdAt,
-      });
-    } catch (error) {
-      console.error(`[media-track] token refresh persist failed for ${storageId}: ${String(error)}`);
-    }
-  };
-}
-
 function hasUsableStorageCredential(storage: { provider: string; payload: unknown }): boolean {
-  const { cookie, credential } = extractStorageCredential(storage.provider, storage.payload);
-  return Boolean(cookie || credential);
+  return Boolean(extractStorageCookie(storage.payload));
 }
 
 /** Pick the default drive for an account when no explicit `connectedStorageId` is
@@ -2719,23 +2753,25 @@ async function getAccountStorageCredentials(
     if (!drive) {
       return null;
     }
-    const { cookie, credential } = extractStorageCredential(drive.provider, drive.payload);
-    // No usable credential (no cookie for 115/夸克, no token blob for 光鸭/天翼)
-    // → treat as not-connected, exactly like the old empty-cookie guard.
-    if (!cookie && !credential) {
+    const cookie = extractStorageCookie(drive.payload);
+    if (!cookie) {
       return null;
     }
-    let { rootCid, moviesCid, tvCid, animeCid } = drive;
+    let { rootCid, moviesCid, tvCid, varietyCid, animeCid } = drive;
     // Self-heal: a live-mode drive with missing category CIDs (e.g. connect-time
     // provisioning was skipped/failed → "目录待建") gets provisioned on first use,
     // so the queued acquisition just proceeds — no manual rebind. Idempotent;
     // persisted so subsequent runs skip. Best-effort: a failure leaves the CIDs
     // null and the scoped executor still fails loud (surfaced, not silent).
     const liveMode = process.env.MEDIA_TRACK_STORAGE_ADAPTER === "115";
-    if (liveMode && drive.status === "active" && !(rootCid && moviesCid && tvCid && animeCid)) {
+    if (liveMode && drive.status === "active" && !(rootCid && moviesCid && tvCid && varietyCid && animeCid)) {
       try {
-        const p = await provisionDriveCategoryDirs(drive.provider, cookie, credential);
-        ({ rootCid, moviesCid, tvCid, animeCid } = p);
+        const p = await provisionDriveCategoryDirs(
+          drive.provider,
+          cookie,
+          libraryDirNamesFromPayload(drive.payload),
+        );
+        ({ rootCid, moviesCid, tvCid, varietyCid, animeCid } = p);
         await getWorkflowRepository().upsertConnectedStorage({
           id: drive.id,
           accountId,
@@ -2746,6 +2782,7 @@ async function getAccountStorageCredentials(
           rootCid,
           moviesCid,
           tvCid,
+          varietyCid,
           animeCid,
           createdAt: drive.createdAt,
         });
@@ -2759,10 +2796,10 @@ async function getAccountStorageCredentials(
       provider: drive.provider,
       status: drive.status,
       cookie,
-      credential,
       rootCid,
       moviesCid,
       tvCid,
+      varietyCid,
       animeCid,
     };
   } catch (error) {
@@ -2852,13 +2889,7 @@ export async function testConnection(
   }
   const brand = getStorageBrand(creds.provider);
   try {
-    await probeStorageConnection(
-      creds.provider,
-      creds.cookie,
-      creds.rootCid,
-      creds.credential,
-      makeTokenPersister(accountId, creds.id, creds.provider),
-    );
+    await probeStorageConnection(creds.provider, creds.cookie, creds.rootCid);
     await getWorkflowRepository().setConnectedStorageStatus(creds.id, "active", null, null);
     await resolveCachedDriveSpace(accountId, creds.id, "active", { forceRefresh: true });
     return { ok: true, status: "active", message: "连接正常。" };
@@ -2879,70 +2910,10 @@ async function probeStorageConnection(
   provider: string,
   cookie: string,
   rootCid: string | null,
-  credential: TokenCredential | null,
-  // Persist a rotated credential if the probe refreshes it mid-flight. Wired by
-  // testConnection (an existing drive). Omitted at first-connect (no row yet).
-  onCredentialRefresh?: ((creds: unknown) => Promise<void>) | undefined,
 ): Promise<void> {
-  const { Pan115CookieClient, Pan123Client, QuarkCookieClient, TianyiClient } = await import(
-    "@media-track/workflow"
-  );
-  if (provider === "guangya") {
-    const blob = (credential ?? {}) as { accessToken?: string; refreshToken?: string; deviceId?: string };
-    // Token-auth: validateToken() does account/v1/user/me + refresh-retry on 401;
-    // a dead token pair throws GuangYaAuthError (caller freezes). rootCid unused.
-    await new GuangYaClient({
-      accessToken: blob.accessToken ?? "",
-      refreshToken: blob.refreshToken ?? "",
-      // Pin the SAME persisted device id as connect/worker so "Test connection"
-      // doesn't mint a fresh one (harmless today — validate is account-host — but
-      // consistent with the rest of the brand's device-pinning).
-      ...(blob.deviceId === undefined ? {} : { deviceId: blob.deviceId }),
-      // A 401 during the probe refreshes the token pair; persist it so the DB
-      // doesn't keep a stale token that later wrongly freezes the drive. (The
-      // client option keeps 光鸭's own onTokensRefreshed vocabulary.)
-      ...(onCredentialRefresh ? { onTokensRefreshed: onCredentialRefresh } : {}),
-    }).validateToken();
-    return;
-  }
-  if (provider === "tianyi") {
-    const blob = (credential ?? {}) as {
-      sessionKey?: string;
-      accessToken?: string;
-      refreshToken?: string;
-      familySessionKey?: string;
-    };
-    // Token-auth: a cheap personal-cloud root listing ("-11") verifies the
-    // sessionKey. A stale session triggers the client's renewSession (accessToken
-    // → refreshToken fallback) — persist the renewed blob so the DB doesn't keep
-    // a dead session that later wrongly freezes the drive. Both renewal steps
-    // failing throws TianyiAuthError (caller freezes). rootCid unused.
-    await new TianyiClient({
-      sessionKey: blob.sessionKey ?? "",
-      accessToken: blob.accessToken ?? "",
-      refreshToken: blob.refreshToken ?? "",
-      ...(blob.familySessionKey === undefined ? {} : { familySessionKey: blob.familySessionKey }),
-      ...(onCredentialRefresh ? { onCredentialRefresh } : {}),
-    }).listFiles("-11");
-    return;
-  }
-  if (provider === "pan123") {
-    const blob = (credential ?? {}) as { token?: string };
-    // 纯 token(v1 无刷新——web 面无 refresh 端点):listFiles("0") 验根可读。
-    // maxPages:1 守住 cheap-read 契约——验活只需第一页,不为存量大账号全量翻页。
-    // 死 token → Pan123Client 抛 Pan123AuthError → registry isAuthError 冻结。
-    // onCredentialRefresh 不接(client 无该 option),签名里的参数对 pan123 闲置。
-    await new Pan123Client({ token: blob.token ?? "" }).listFiles("0", { maxPages: 1 });
-    return;
-  }
+  const { Pan115CookieClient, QuarkCookieClient } = await import("@media-track/workflow");
   if (provider === "quark") {
     await new QuarkCookieClient({ cookie }).listItems({ directoryId: rootCid ?? "0" });
-    return;
-  }
-  if (provider === "uc") {
-    // Same family client, UC profile. A dead cookie throws the family auth error
-    // (code 31001) → registry isAuthError freezes the drive.
-    await new QuarkCookieClient({ cookie, profile: UC_PROFILE }).listItems({ directoryId: rootCid ?? "0" });
     return;
   }
   if (provider === "pan115") {
@@ -3015,22 +2986,9 @@ async function getWorkerStorageExecutor(
       // Scope writes to THIS drive's own provisioned dirs — not the global env CIDs
       // (which belong to the default account's drive). Dispatch by the drive's
       // brand: 115 → Storage115Executor, quark → QuarkStorageExecutor.
-      const scopeCids = [creds.rootCid, creds.moviesCid, creds.tvCid, creds.animeCid].filter(
+      const scopeCids = [creds.rootCid, creds.moviesCid, creds.tvCid, creds.varietyCid, creds.animeCid].filter(
         (cid): cid is string => Boolean(cid),
       );
-      // Token-auth brands (光鸭/天翼) authenticate with a rotating credential blob
-      // (not a cookie): pass the credential + a persist hook so a mid-run refresh
-      // writes the new blob back into this drive's payload. Cookie brands (115/
-      // 夸克) keep the cookie path untouched.
-      if (isRegisteredStorageProvider(creds.provider) && getStorageBrand(creds.provider).authKind === "token") {
-        return createExecutorForBrand({
-          provider: creds.provider,
-          credential: creds.credential ?? {},
-          scopeCids,
-          env: process.env,
-          onCredentialRefresh: makeTokenPersister(accountId, creds.id, creds.provider),
-        });
-      }
       return createExecutorForBrand({
         provider: creds.provider,
         cookie: creds.cookie,
@@ -3071,6 +3029,7 @@ async function getWorkerStorageParents(
   connectedStorageId?: string | null,
 ): Promise<{
   tv: string;
+  variety: string;
   anime: string;
   movies: string;
 }> {
@@ -3080,6 +3039,7 @@ async function getWorkerStorageParents(
       : null;
   return {
     tv: creds?.tvCid || storageParentDirectoryId(),
+    variety: creds?.varietyCid || creds?.tvCid || varietyParentDirectoryId(),
     anime: creds?.animeCid || creds?.tvCid || animeParentDirectoryId(),
     movies: creds?.moviesCid || moviesParentDirectoryId(),
   };
@@ -3285,6 +3245,11 @@ function animeParentDirectoryId(): string {
   return process.env.MEDIA_TRACK_ANIME_PARENT_CID ?? storageParentDirectoryId();
 }
 
+/** Separate landing parent for 综艺 shows; co-locates with TV until configured. */
+function varietyParentDirectoryId(): string {
+  return process.env.MEDIA_TRACK_VARIETY_PARENT_CID ?? storageParentDirectoryId();
+}
+
 function defaultQuality(): string {
   return "4K";
 }
@@ -3319,27 +3284,17 @@ export async function importForeignWorkFiles(input: {
   movieTitle: string;
   year: number;
 }): Promise<{ movieDirectoryId: string; movedFileIds: string[] }> {
-  // Count as in flight: this creates a folder and moves files on the drive. A container
-  // swap mid-way would leave the folder made and the files half moved, and the retry
-  // then fails. /api/update/busy waits for this to settle before the updater swaps.
-  return whileInFlight(async () => {
-    // Recheck the hold now that this import is counted in flight. The action checks it too,
-    // but between that check and this increment the updater could take the hold and see
-    // inFlightCount() === 0 (busy:false), then swap mid-move. Ordering the increment before
-    // this check closes that gap: if the hold is on here, the swap has not been cleared yet.
-    if (isUpdateHoldActive(Date.now())) throw new UpdateInProgressError();
-    // Foreign-work UI is free-text title/year only (no TMDB id). Folder stays the
-    // legacy `Title (Year)` form on purpose — `importForeignWorkAsMovie` supports
-    // `{tmdb-N}` only when a caller passes tmdbId.
-    const accountId = await getCurrentAccountId();
-    const parents = await getWorkerStorageParents(accountId);
-    return importForeignWorkAsMovie({
-      storage: await getWorkerStorageExecutor(accountId),
-      providerFileIds: input.providerFileIds,
-      movieTitle: input.movieTitle,
-      year: input.year,
-      moviesParentDirectoryId: parents.movies,
-    });
+  // Foreign-work UI is free-text title/year only (no TMDB id). Folder stays the
+  // legacy `Title (Year)` form on purpose — `importForeignWorkAsMovie` supports
+  // `{tmdb-N}` only when a caller passes tmdbId.
+  const accountId = await getCurrentAccountId();
+  const parents = await getWorkerStorageParents(accountId);
+  return importForeignWorkAsMovie({
+    storage: await getWorkerStorageExecutor(accountId),
+    providerFileIds: input.providerFileIds,
+    movieTitle: input.movieTitle,
+    year: input.year,
+    moviesParentDirectoryId: parents.movies,
   });
 }
 
@@ -3449,6 +3404,8 @@ export interface ConnectedStorageView {
   status: "active" | "frozen";
   /** True once category directories are provisioned (CIDs stored). */
   provisioned: boolean;
+  /** The user's chosen media-tree layout (blank = built-in defaults). */
+  libraryDirs: LibraryDirNames;
   /** Cached or freshly probed drive space (totalBytes / usedBytes). Null when never probed. */
   space?: DriveSpaceInfo | null;
 }
@@ -3478,7 +3435,8 @@ export async function getAccountConnectedStorages(options?: {
         connectedAt: meta?.connectedAt ?? null,
         createdAt: row.createdAt,
         status: row.status,
-        provisioned: Boolean(row.tvCid && row.moviesCid && row.animeCid),
+        provisioned: Boolean(row.tvCid && row.moviesCid && row.varietyCid && row.animeCid),
+        libraryDirs: libraryDirNamesFromPayload(row.payload),
         ...(space === undefined ? {} : { space }),
       };
     }),
@@ -3537,28 +3495,19 @@ export async function resolveCachedDriveSpace(
       if (!drive) {
         return cached ? { totalBytes: cached.totalBytes, usedBytes: cached.usedBytes } : null;
       }
-      const { cookie, credential } = extractStorageCredential(drive.provider, drive.payload);
-      if (!cookie && !credential) {
+      const cookie = extractStorageCookie(drive.payload);
+      if (!cookie) {
         return cached ? { totalBytes: cached.totalBytes, usedBytes: cached.usedBytes } : null;
       }
-      const scopeCids = [drive.rootCid, drive.moviesCid, drive.tvCid, drive.animeCid].filter(
+      const scopeCids = [drive.rootCid, drive.moviesCid, drive.tvCid, drive.varietyCid, drive.animeCid].filter(
         (cid): cid is string => Boolean(cid),
       );
-      const executor =
-        getStorageBrand(drive.provider).authKind === "token"
-          ? createExecutorForBrand({
-              provider: drive.provider,
-              credential: credential ?? {},
-              scopeCids,
-              env: process.env,
-              onCredentialRefresh: makeTokenPersister(accountId, drive.id, drive.provider),
-            })
-          : createExecutorForBrand({
-              provider: drive.provider,
-              cookie,
-              scopeCids,
-              env: process.env,
-            });
+      const executor = createExecutorForBrand({
+        provider: drive.provider,
+        cookie,
+        scopeCids,
+        env: process.env,
+      });
       if (!executor.getSpace) {
         return cached ? { totalBytes: cached.totalBytes, usedBytes: cached.usedBytes } : null;
       }
@@ -3609,95 +3558,6 @@ async function refreshConnectedStorage(
 }
 
 /**
- * Shared bind skeleton for the two TOKEN brands (光鸭/天翼): enforce instance-wide
- * ownership, then refresh-or-insert the connected_storage row. The parts that
- * genuinely differ per brand — uid derivation (光鸭 validates its token over the
- * network for the authoritative sub; 天翼 parses session.loginName) and the
- * credential-blob / meta shape — are the thin caller's job; it computes
- * providerUid, builds credentialBlob + meta, and hands them here.
- * - reject: this (provider, uid) already belongs to ANOTHER account → throw.
- * - refresh: same account re-login → overwrite payload with {…credentialBlob, meta},
- *   keeping the row's id / CIDs / label / createdAt (the client's freshly-rotated
- *   credential replaces the old one; anything durable that must survive renewal
- *   already lives under `meta`, e.g. 天翼's loginName).
- * - insert: new connection → best-effort provision the media tree under the brand's
- *   provisionRootId, store id `cs_<provider>_<uidSuffix>` with label null.
- * ⚠️ 光鸭's deviceId-pinning-on-rebind is threaded IN by the caller (it peeks the
- *   existing row and bakes the pinned deviceId into credentialBlob) so this helper
- *   stays brand-agnostic. Cookie brands (夸克/115) are NOT collapsed here — they
- *   carry real per-brand differences (115 ownership + app_settings mirror; 夸克
- *   cookie shape) and keep their own binds.
- */
-async function bindTokenConnectedStorage(input: {
-  provider: string;
-  providerUid: string;
-  credentialBlob: Record<string, unknown>;
-  meta: Record<string, unknown>;
-  /** Pre-fetched row (光鸭 already looks it up to pin deviceId) — pass it to avoid
-   *  a duplicate findConnectedStorageByUid on every bind. Omit to let the helper
-   *  fetch; `null` means "looked up, none found" (don't re-fetch). */
-  existing?: Awaited<ReturnType<ReturnType<typeof getWorkflowRepository>["findConnectedStorageByUid"]>>;
-}): Promise<{ providerUid: string }> {
-  const { provider, providerUid, credentialBlob, meta } = input;
-  const accountId = await requireAuthenticatedAccountId();
-  const repository = getWorkflowRepository();
-  const existing =
-    input.existing !== undefined
-      ? input.existing
-      : await repository.findConnectedStorageByUid(provider, providerUid);
-  const decision = resolveStorageBinding({ provider, providerUid, accountId, existing });
-  if (decision.action === "reject") {
-    throw new StorageOwnedByOtherAccountError();
-  }
-  const payload = { ...credentialBlob, meta };
-  if (decision.action === "refresh" && existing) {
-    // Same account re-login → refresh the credential blob, keep the resolved CIDs.
-    await refreshConnectedStorage(repository, existing, {
-      id: existing.id,
-      accountId,
-      provider,
-      providerUid,
-      label: existing.label,
-      payload,
-      rootCid: existing.rootCid,
-      moviesCid: existing.moviesCid,
-      tvCid: existing.tvCid,
-      animeCid: existing.animeCid,
-      createdAt: existing.createdAt,
-    });
-    return { providerUid };
-  }
-  // insert: provision the media tree under the brand's provisionRootId. Best-effort
-  // — a failure still stores the connection (worker self-heals / falls back later).
-  let cids: { rootCid: string | null; moviesCid: string | null; tvCid: string | null; animeCid: string | null } = {
-    rootCid: null,
-    moviesCid: null,
-    tvCid: null,
-    animeCid: null,
-  };
-  try {
-    cids = await provisionDriveCategoryDirs(provider, "", credentialBlob);
-  } catch (error) {
-    console.error(`[media-track] ${provider} directory provision failed (will store without CIDs): ${String(error)}`);
-  }
-  const idSuffix = providerUid.replace(/[^A-Za-z0-9]/g, "").slice(0, 48);
-  await repository.upsertConnectedStorage({
-    id: `cs_${provider}_${idSuffix}`,
-    accountId,
-    provider,
-    providerUid,
-    label: null,
-    payload,
-    rootCid: cids.rootCid,
-    moviesCid: cids.moviesCid,
-    tvCid: cids.tvCid,
-    animeCid: cids.animeCid,
-    createdAt: new Date().toISOString(),
-  });
-  return { providerUid };
-}
-
-/**
  * §7 P2: bind a freshly-exchanged 115 cookie to the CURRENT account's
  * connected_storage, enforcing instance-wide ownership and provisioning the
  * category directories on a genuinely new connection.
@@ -3739,6 +3599,7 @@ async function bindPan115ConnectedStorage(input: {
       rootCid: existing.rootCid,
       moviesCid: existing.moviesCid,
       tvCid: existing.tvCid,
+      varietyCid: existing.varietyCid,
       animeCid: existing.animeCid,
       createdAt: existing.createdAt,
     });
@@ -3751,9 +3612,10 @@ async function bindPan115ConnectedStorage(input: {
     rootCid: process.env.MEDIA_TRACK_115_TEST_ROOT_CID ?? null,
     moviesCid: process.env.MEDIA_TRACK_MOVIES_PARENT_CID ?? null,
     tvCid: process.env.MEDIA_TRACK_TV_PARENT_CID ?? null,
+    varietyCid: process.env.MEDIA_TRACK_VARIETY_PARENT_CID ?? null,
     animeCid: process.env.MEDIA_TRACK_ANIME_PARENT_CID ?? null,
   };
-  const hasEnvCids = Boolean(cids.tvCid && cids.moviesCid && cids.animeCid);
+  const hasEnvCids = Boolean(cids.tvCid && cids.moviesCid && cids.varietyCid && cids.animeCid);
   if (!hasEnvCids && process.env.MEDIA_TRACK_STORAGE_ADAPTER === "115") {
     try {
       // Bootstrap (unrestricted) executor — a fresh drive has no write scope yet,
@@ -3774,6 +3636,7 @@ async function bindPan115ConnectedStorage(input: {
         rootCid: provisioned.rootCid,
         moviesCid: provisioned.moviesCid,
         tvCid: provisioned.tvCid,
+        varietyCid: provisioned.varietyCid,
         animeCid: provisioned.animeCid,
       };
     } catch (error) {
@@ -3790,6 +3653,7 @@ async function bindPan115ConnectedStorage(input: {
     rootCid: cids.rootCid,
     moviesCid: cids.moviesCid,
     tvCid: cids.tvCid,
+    varietyCid: cids.varietyCid,
     animeCid: cids.animeCid,
     createdAt: new Date().toISOString(),
   });
@@ -3843,35 +3707,18 @@ export async function completePan115QrLogin(input: {
  * media-track/{Movies,TV,Anime} tree on a genuinely new connection (best-effort).
  */
 export async function connectQuarkCookie(rawCookie: string): Promise<{ providerUid: string }> {
-  return connectCloudFamilyCookie(rawCookie, "quark");
-}
-
-/** Settings "添加网盘 → UC网盘". Same family protocol as 夸克 — one implementation,
- *  driven by the brand registry (label + provisioning root), so a future family
- *  member needs no new connect path. */
-export async function connectUcCookie(rawCookie: string): Promise<{ providerUid: string }> {
-  return connectCloudFamilyCookie(rawCookie, "uc");
-}
-
-/** Bind a pasted cookie for a 阿里云盘族 brand (夸克 / UC). Enforces instance-wide
- *  ownership, live-probes BEFORE binding, and provisions the media tree on a
- *  genuinely new connection. */
-async function connectCloudFamilyCookie(
-  rawCookie: string,
-  provider: "quark" | "uc",
-): Promise<{ providerUid: string }> {
-  const label = getStorageBrand(provider).label;
+  const label = getStorageBrand("quark").label;
   const cookie = rawCookie.trim();
   if (!cookie) {
     throw new Error(`请粘贴${label} cookie。`);
   }
-  // Identical cookie key names across the family (verified live on UC).
-  const providerUid = parseCloudDriveUid(cookie);
+  const providerUid = parseQuarkUid(cookie);
   if (!providerUid) {
     throw new Error(
       `无法从该 cookie 解析${label}账号（需包含 __uid 或 __kps）；请从浏览器 Network 请求头复制完整 Cookie（Copy as cURL 最省事）。`,
     );
   }
+  const provider = "quark" as const;
   const accountId = await requireAuthenticatedAccountId();
   const repository = getWorkflowRepository();
   const existing = await repository.findConnectedStorageByUid(provider, providerUid);
@@ -3879,12 +3726,12 @@ async function connectCloudFamilyCookie(
   if (decision.action === "reject") {
     throw new StorageOwnedByOtherAccountError();
   }
-  // Live-check BEFORE bind (parity with 123/天翼/光鸭): dead/revoked cookie must
-  // not land in connected_storages. Always probe the account root ("0"), not
-  // existing.rootCid (that is the mediary category tree — user may have deleted
-  // it; a missing layout dir must not block cookie refresh).
+  // Live-check BEFORE bind: dead/revoked cookie must not land in connected_storages.
+  // Always probe the account root ("0"), not existing.rootCid (that is the mediary
+  // category tree — user may have deleted it; a missing layout dir must not block
+  // cookie refresh).
   try {
-    await probeStorageConnection(provider, cookie, "0", null);
+    await probeStorageConnection(provider, cookie, "0");
   } catch (error) {
     throw new Error(
       `无法用该 cookie 连接${label}：${error instanceof Error ? error.message : String(error)}`,
@@ -3904,6 +3751,7 @@ async function connectCloudFamilyCookie(
       rootCid: existing.rootCid,
       moviesCid: existing.moviesCid,
       tvCid: existing.tvCid,
+      varietyCid: existing.varietyCid,
       animeCid: existing.animeCid,
       createdAt: existing.createdAt,
     });
@@ -3912,16 +3760,23 @@ async function connectCloudFamilyCookie(
   // insert: provision the category tree under the 夸克 root ("0"). Best-effort —
   // a failure still stores the connection (worker falls back to env CIDs / none).
   // Auth already proved live above; provision errors are non-fatal layout issues.
-  let cids: { rootCid: string | null; moviesCid: string | null; tvCid: string | null; animeCid: string | null } = {
+  let cids: {
+    rootCid: string | null;
+    moviesCid: string | null;
+    tvCid: string | null;
+    varietyCid: string | null;
+    animeCid: string | null;
+  } = {
     rootCid: null,
     moviesCid: null,
     tvCid: null,
+    varietyCid: null,
     animeCid: null,
   };
   try {
     const executor = createExecutorForBrand({ provider, cookie, scopeCids: [] });
     cids = await provisionCategoryDirs({
-      baseParentId: getStorageBrand(provider).provisionRootId, // family account root ("0")
+      baseParentId: getStorageBrand(provider).provisionRootId, // account root ("0")
       ...customDirNamesFromEnv(process.env),
       storage: {
         listChildDirs: (parentId: string) => executor.listChildDirectories(parentId),
@@ -3942,6 +3797,7 @@ async function connectCloudFamilyCookie(
     rootCid: cids.rootCid,
     moviesCid: cids.moviesCid,
     tvCid: cids.tvCid,
+    varietyCid: cids.varietyCid,
     animeCid: cids.animeCid,
     createdAt: new Date().toISOString(),
   });
@@ -3954,221 +3810,9 @@ async function connectCloudFamilyCookie(
  * 有效性由用户真机扫码确认;兑换失败时设置页折叠的 cookie 粘贴是回退。
  */
 export async function completeQuarkQrLogin(serviceTicket: string): Promise<{ providerUid: string }> {
-  return completeCloudFamilyQrLogin(serviceTicket, "quark");
-}
-
-/** Settings "添加网盘 → UC网盘": finish a UC QR scan. Same family CAS flow as 夸克 —
- *  only the QR profile differs, so the whole exchange+bind path is shared. */
-export async function completeUcQrLogin(serviceTicket: string): Promise<{ providerUid: string }> {
-  return completeCloudFamilyQrLogin(serviceTicket, "uc");
-}
-
-/** Redeem a CAS service_ticket into a drive cookie and bind it, for a 阿里云盘族
- *  brand. ⚠️ The ticket→cookie hop is the fragile one on both brands; a failure
- *  here surfaces to the UI, which offers cookie paste as the fallback. */
-async function completeCloudFamilyQrLogin(
-  serviceTicket: string,
-  provider: "quark" | "uc",
-): Promise<{ providerUid: string }> {
-  const { QuarkQrLoginClient, QUARK_QR_PROFILE, UC_QR_PROFILE } = await import("@media-track/workflow");
-  const profile = provider === "uc" ? UC_QR_PROFILE : QUARK_QR_PROFILE;
-  const { cookie } = await new QuarkQrLoginClient({ profile }).exchangeCookie(serviceTicket);
-  return provider === "uc" ? connectUcCookie(cookie) : connectQuarkCookie(cookie);
-}
-
-/**
- * 光鸭云盘:粘贴 access_token + refresh_token 绑定为一块新盘。与 connectQuarkCookie
- * 同构,只是凭证是 token 二元组(非 cookie)且认证走 validateToken()(account/v1/user/me)
- * 而非 listItems。validateToken() 返回 sub 作为 providerUid(键 UNIQUE(provider,uid));
- * token 失效会抛 GuangYaAuthError → 报错返回。绑定/provision/refresh 全镜像夸克路径。
- */
-export async function connectGuangYa(rawAccessToken: string, rawRefreshToken: string): Promise<{ providerUid: string }> {
-  const accessToken = rawAccessToken.trim();
-  const refreshToken = rawRefreshToken.trim();
-  if (!accessToken || !refreshToken) {
-    throw new Error("请填写光鸭 access_token 与 refresh_token。");
-  }
-  // Pin a stable device id ONCE at connect time. Persisting it (vs. letting the
-  // client auto-generate a fresh one each worker run) keeps the `Did` header
-  // constant across runs, so 光鸭's risk control sees one device, not many.
-  const deviceId = generateGuangYaDeviceId();
-  // validateToken() confirms the pair is live AND yields the authoritative sub.
-  const client = new GuangYaClient({ accessToken, refreshToken, deviceId });
-  let providerUid: string;
-  try {
-    providerUid = await client.validateToken();
-  } catch (error) {
-    throw new Error(
-      `无法用该 token 登录光鸭云盘（请确认 access_token / refresh_token 完整且未过期）：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  // 风控: a re-bind must NOT look like a new device — reuse the already-pinned
-  // deviceId when this uid is already connected, else keep the freshly-generated
-  // one. Baking the resolved deviceId into credentialBlob here lets
-  // bindTokenConnectedStorage stay brand-agnostic (it never touches deviceId).
-  const existing = await getWorkflowRepository().findConnectedStorageByUid("guangya", providerUid);
-  const pinnedDeviceId = (existing?.payload as { deviceId?: string } | null)?.deviceId ?? deviceId;
-  return bindTokenConnectedStorage({
-    provider: "guangya",
-    providerUid,
-    credentialBlob: { accessToken, refreshToken, deviceId: pinnedDeviceId },
-    meta: { connectedAt: new Date().toISOString() },
-    existing, // reuse the row we just fetched for deviceId-pinning (no double lookup)
-  });
-}
-
-/**
- * 天翼云盘:把一次登录换到的 TianyiSession(个人+家庭凭证一次拿到)绑定为当前账号
- * 的一块新盘(brand "tianyi")。QR 扫码与 SSON 粘贴两入口都收敛到这里,镜像
- * connectGuangYa 的结构(跨账号 reject / 同账号 refresh 保留 CIDs / 首绑 provision)。
- * - providerUid = session.loginName(键 UNIQUE(provider, provider_uid))。空 loginName
- *   = 换 session 没拿到账号标识,直接报错(否则空串当 uid 绑定,后续无法区分账号)。
- * ⚠️ 持久身份 loginName 落在 payload.meta.loginName(不放顶层):会话续期时
- *   makeTokenPersister 用 client 回传的凭证 blob + 保留的 meta 覆盖 payload,顶层
- *   loginName 会被冲掉,只有 meta 里的才持久(见 T6 契约注释 makeTokenPersister)。
- *   顶层只放会轮换的凭证(sessionKey/accessToken/refreshToken/familySessionKey)。
- */
-async function bindTianyiConnectedStorage(session: TianyiSession): Promise<{ providerUid: string }> {
-  const providerUid = parseTianyiUid(session.loginName);
-  if (!providerUid) {
-    throw new Error("无法确定天翼云盘账号(登录返回的 loginName 为空);请重新扫码或粘贴 SSON 后重试。");
-  }
-  // The rotating credential blob (what the client/provision consume + what session
-  // renewal replaces). loginName is durable identity → it lives ONLY under
-  // payload.meta, never top-level (T6 contract: makeTokenPersister overwrites the
-  // top-level blob on every renewal). familySessionKey rides along only when present.
-  const credentialBlob: Record<string, unknown> = {
-    sessionKey: session.sessionKey,
-    accessToken: session.accessToken,
-    refreshToken: session.refreshToken,
-    ...(session.familySessionKey ? { familySessionKey: session.familySessionKey } : {}),
-  };
-  return bindTokenConnectedStorage({
-    provider: "tianyi",
-    providerUid,
-    credentialBlob,
-    meta: { connectedAt: new Date().toISOString(), loginName: session.loginName },
-  });
-}
-
-/**
- * 天翼扫码登录:用轮询确认后拿到的 redirectUrl,在 getSessionForPC.action 兑换全套
- * session(个人+家庭凭证一次拿到),再走与 SSON 粘贴完全相同的绑定/provision。导出
- * 供 QR 确认 API 路由(Task 8)调用。
- * ℹ️ QR 会话的 cookie jar 只在 exchangeSession 内部用完即弃 —— exchange 先于 bind,
- *    bind 只吃换好的 TianyiSession,jar 不参与绑定。
- */
-export async function completeTianyiQrLogin(
-  session: TianyiQrSession,
-  redirectUrl: string,
-): Promise<{ providerUid: string }> {
-  const { TianyiQrLoginClient } = await import("@media-track/workflow");
-  // Wrap ONLY the exchange: a raw transport error (TIANYI_QR_HTTP_FAILED / timeout)
-  // becomes an actionable branded message. bind() stays OUTSIDE the try so its
-  // StorageOwnedByOtherAccountError propagates uncaught (the T8 route 409s on it).
-  let tianyiSession: TianyiSession;
-  try {
-    tianyiSession = await new TianyiQrLoginClient().exchangeSession(session, redirectUrl);
-  } catch (error) {
-    throw new Error(`无法完成天翼扫码登录（请重新扫码）：${error instanceof Error ? error.message : String(error)}`);
-  }
-  return bindTianyiConnectedStorage(tianyiSession);
-}
-
-/**
- * 天翼 SSON 兜底:粘贴 SSON cookie(扫码不便时的回退),loginBySson 走
- * unifyLoginForPC 重定向换全套 session,再绑定。SSON 为空直接报错(不触网)。
- */
-export async function connectTianyiSson(sson: string): Promise<{ providerUid: string }> {
-  const trimmed = sson.trim();
-  if (!trimmed) {
-    throw new Error("请粘贴天翼 SSON cookie。");
-  }
-  const { TianyiQrLoginClient } = await import("@media-track/workflow");
-  // Wrap ONLY the SSON login so a raw transport/timeout error surfaces as an
-  // actionable branded message. bind() stays OUTSIDE the try so its
-  // StorageOwnedByOtherAccountError propagates uncaught (T8 route 409s on it).
-  let session: TianyiSession;
-  try {
-    session = await new TianyiQrLoginClient().loginBySson(trimmed);
-  } catch (error) {
-    throw new Error(
-      `无法用该 SSON 登录天翼云盘（请确认 cookie 完整且未过期）：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  return bindTianyiConnectedStorage(session);
-}
-
-/**
- * 123网盘:把扫码/粘贴拿到的 90 天 token 绑定为当前账号的一块新盘(brand "pan123")。
- * QR 与粘 token 两入口都收敛到这里(镜像 bindTianyiConnectedStorage)。
- * - providerUid = parsePan123Uid(token)(解 JWT payload 的稳定数字用户 id)。解不出
- *   = token 不是合法 123 JWT,直接报错。
- * - 纯 token 模型:v1 无凭证轮换(makeTokenPersister 对 pan123 永不触发),credential
- *   blob 只有 {token};durable 元数据照约定放 payload.meta。
- */
-async function bindPan123ConnectedStorage(rawToken: string): Promise<{ providerUid: string }> {
-  const token = rawToken.trim();
-  const providerUid = parsePan123UidOrThrow(token);
-  return bindTokenConnectedStorage({
-    provider: "pan123",
-    providerUid,
-    credentialBlob: { token },
-    meta: { connectedAt: new Date().toISOString() },
-  });
-}
-
-/** 本地(纯函数零网络)从 123 登录 token 解稳定数字用户 id;解不出 = 不是合法 123
- *  JWT,抛精准错误。connect 两入口在触网 probe 前先走这里——垃圾输入不发给 123
- *  (否则 401 → 误导性的「确认 token 完整且未过期」措辞盖掉真原因)。 */
-function parsePan123UidOrThrow(token: string): string {
-  const providerUid = parsePan123Uid(token);
-  if (!providerUid) {
-    throw new Error("无法从该 token 识别 123网盘账号（不是有效的 123 登录 token）；请重新扫码或粘贴完整 token。");
-  }
-  return providerUid;
-}
-
-/**
- * 123 扫码登录完成:前端轮询 result 拿到 90 天 token 后,confirm 路由把 token 传来,
- * 这里直接绑定(123 无天翼那种 exchange 步骤——token 即最终凭证)。先本地解 uid 拦
- * 垃圾 token,再 probe 一次验活,防扫码流程异常拿到坏 token 入库。导出供 QR confirm
- * API 路由(T8)调用。
- */
-export async function completePan123QrLogin(token: string): Promise<{ providerUid: string }> {
-  const trimmed = token.trim();
-  if (!trimmed) {
-    throw new Error("扫码登录未返回 token，请重新扫码。");
-  }
-  // 先本地解 uid(零网络,垃圾 token 得到精准错误),再验活、再绑(bind 留在 try 外,
-  // StorageOwnedByOtherAccountError 原样上抛给路由 409)。
-  parsePan123UidOrThrow(trimmed);
-  try {
-    await probeStorageConnection("pan123", "", null, { token: trimmed });
-  } catch (error) {
-    throw new Error(
-      `无法用该扫码 token 连接 123网盘（请重新扫码）：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  return bindPan123ConnectedStorage(trimmed);
-}
-
-/**
- * 123 粘 token 兜底:用户从浏览器 localStorage/抓包粘贴 90 天 token(扫码不便时的回退)。
- * 空/解不出 uid 直接报错(不触网);probe 验活后绑定。
- */
-export async function connectPan123Token(rawToken: string): Promise<{ providerUid: string }> {
-  const trimmed = rawToken.trim();
-  if (!trimmed) {
-    throw new Error("请粘贴 123网盘登录 token。");
-  }
-  parsePan123UidOrThrow(trimmed);
-  try {
-    await probeStorageConnection("pan123", "", null, { token: trimmed });
-  } catch (error) {
-    throw new Error(
-      `无法用该 token 连接 123网盘（请确认 token 完整且未过期）：${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  return bindPan123ConnectedStorage(trimmed);
+  // ⚠️ The ticket→cookie hop is the fragile one; a failure here surfaces to the UI,
+  // which offers cookie paste as the fallback.
+  const { QuarkQrLoginClient, QUARK_QR_PROFILE } = await import("@media-track/workflow");
+  const { cookie } = await new QuarkQrLoginClient({ profile: QUARK_QR_PROFILE }).exchangeCookie(serviceTicket);
+  return connectQuarkCookie(cookie);
 }

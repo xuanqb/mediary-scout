@@ -114,25 +114,11 @@ const BRAND_RATE_LIMIT_MARKERS = [
 ];
 
 const BRAND_AUTH_MARKERS = [
-  "guangya",
   "quark",
-  // NOT a bare "uc": that is a substring of "no such model" ("no s-uc-h"), which
-  // would misclassify an LLM 404 as a netdisk auth failure — caught by the full
-  // suite 2026-10-23. The "uc_" ERROR-CODE PREFIX is the right granularity: it
-  // covers every UC_* code (UC_AUTH_FAILED, UC_LIST_ITEMS_FAILED,
-  // UC_CREATE_FOLDER_FAILED, UC_SHARE_TOKEN_FAILED, UC_MOVE_FAILED, …) so a UC
-  // 429/5xx short-circuits as a brand error instead of looking like an LLM one,
-  // while "no such model" (no underscore) still falls through to the LLM paths.
-  "uc_",
   "pan115",
-  "tianyi",
-  "pan123",
   "pan115autherror",
   "quarkautherror",
   "clouddriveautherror",
-  "guangyaautherror",
-  "tianyiautherror",
-  "pan123autherror",
 ];
 
 function messageOf(error: unknown): string {

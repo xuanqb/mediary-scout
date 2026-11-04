@@ -1,23 +1,17 @@
 import QRCode from "qrcode";
 import { NextResponse, type NextRequest } from "next/server";
-import { QuarkQrLoginClient, QUARK_QR_PROFILE, UC_QR_PROFILE } from "@media-track/workflow";
+import { QuarkQrLoginClient, QUARK_QR_PROFILE } from "@media-track/workflow";
 import type { CloudDriveQrProfile } from "@media-track/workflow";
 import { isDemoMode } from "../../../lib/demo-mode";
 
 /**
- * The four QR routes (token / status / image / confirm) are identical across the
- * family brands; only the profile, the QR-content prefix and the completion
- * helper differ. They live here as factories rather than as copies so that
- * validation and error mapping cannot drift between brands — the length cap
- * below had already been added to two brands and forgotten on the other two.
+ * The four QR routes (token / status / image / confirm). They live here as
+ * factories rather than as copies so that validation and error mapping cannot
+ * drift.
  */
-export type FamilyQrBrand = "quark" | "uc";
-
 export interface FamilyQrRoutesConfig {
-  brand: FamilyQrBrand;
   profile: CloudDriveQrProfile;
-  /** Prefix the QR content must start with. Brand-specific on purpose: 夸克's
-   *  su.quark.cn QR on UC would open the wrong app. */
+  /** Prefix the QR content must start with. */
   qrContentPrefix: string;
 }
 
@@ -101,10 +95,8 @@ export function createFamilyQrRoutes(config: FamilyQrRoutesConfig) {
         return NextResponse.json({ ok: false, error: String(error) }, { status: 502 });
       }
 
-      // Binding UC with 夸克's helper would store a UC cookie under the 夸克 row.
-      const complete = config.brand === "uc" ? runtime.completeUcQrLogin : runtime.completeQuarkQrLogin;
       try {
-        const result = await complete(serviceTicket);
+        const result = await runtime.completeQuarkQrLogin(serviceTicket);
         return NextResponse.json({ ok: true, ...result });
       } catch (error) {
         if (error instanceof runtime.StorageOwnedByOtherAccountError) {
@@ -119,16 +111,9 @@ export function createFamilyQrRoutes(config: FamilyQrRoutesConfig) {
   };
 }
 
-/** Brand wiring. Only pure data here — the completion helpers are imported
- *  lazily inside `confirm` so the other three routes never load the DB layer. */
+/** Brand wiring. Only pure data here — the completion helper is imported lazily
+ *  inside `confirm` so the other three routes never load the DB layer. */
 export const quarkFamilyRoutes: FamilyQrRoutesConfig = {
-  brand: "quark",
   profile: QUARK_QR_PROFILE,
   qrContentPrefix: "https://su.quark.cn/",
-};
-
-export const ucFamilyRoutes: FamilyQrRoutesConfig = {
-  brand: "uc",
-  profile: UC_QR_PROFILE,
-  qrContentPrefix: "https://su.uc.cn/",
 };

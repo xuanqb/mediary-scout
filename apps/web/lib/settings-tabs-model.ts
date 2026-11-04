@@ -5,7 +5,6 @@ export const SETTINGS_TABS = [
   { id: "services", label: "资源与服务" },
   { id: "preferences", label: "获取偏好" },
   { id: "patrol", label: "巡检与通知" },
-  { id: "update", label: "更新" },
   { id: "account", label: "账号" },
 ] as const;
 
@@ -21,11 +20,10 @@ const TAB_IDS = new Set<string>(SETTINGS_TABS.map((tab) => tab.id));
  * → hide). See the MutationObserver in `settings-tabs.tsx` for why the flag
  * cannot simply be read from env at build time.
  *
- * Members render `null` for the same class of reason (not the站主 /
- * feature off / 演示站), so they share one mechanism — but their visibility is
- * INDEPENDENT: 多用户关时 account 隐藏而 update 仍可见；演示站只藏 update。
+ * Members render `null` for the same class of reason (e.g. 多用户关闭时账号管理
+ * 整块不渲染), so they share one mechanism.
  */
-export const OBSERVED_SETTINGS_TABS = ["account", "update"] as const;
+export const OBSERVED_SETTINGS_TABS = ["account"] as const;
 
 export type ObservedSettingsTabId = (typeof OBSERVED_SETTINGS_TABS)[number];
 
@@ -37,8 +35,7 @@ const ACCOUNT_HASHES = new Set(["#password", "#accounts"]);
 
 /**
  * @param visible 受观察 tab 的可见性。为兼容旧调用点，传布尔时只表示
- *   「账号 tab 可见」——它绝不顺带放开 update，否则任一受观察 tab 的深链
- *   就能借另一个 tab 的可见性绕过 fail-closed。
+ *   「账号 tab 可见」。
  */
 export function resolveSettingsTab(
   param: string | null | undefined,

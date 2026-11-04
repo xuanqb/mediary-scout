@@ -63,7 +63,7 @@ describe("toMemoryItem — what the detail page shows", () => {
   });
 
   it("drive tag → the drive's label", () => {
-    expect(toMemoryItem({ ...base, kind: "works", provider: "guangya" }).driveLabel).toBe("光鸭云盘");
+    expect(toMemoryItem({ ...base, kind: "works", provider: "quark" }).driveLabel).toBe("夸克网盘");
   });
 });
 
@@ -75,7 +75,7 @@ describe("drive labels resolve concrete drives", () => {
     ]);
     expect(label("cs_1")).toBe("115 网盘 …4004");
     expect(label("cs_2")).toBe("朋友的 115");
-    expect(label("guangya")).toBe("光鸭云盘");
+    expect(label("quark")).toBe("夸克网盘");
     expect(label("cs_gone_123")).toBe("已解绑的网盘");
   });
 });

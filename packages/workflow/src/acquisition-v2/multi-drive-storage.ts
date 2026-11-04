@@ -1,4 +1,4 @@
-import type { TransferAttempt } from "../domain.js";
+import type { LibraryCategory, TransferAttempt } from "../domain.js";
 import { ensureMediaLibraryDirectory, findExistingMediaLibraryDirectory } from "../media-library-folder.js";
 import { formatByteSize, formatDriveSpaceSummary } from "../domain.js";
 import type { AcquisitionDriveContext, StorageExecutor } from "../ports.js";
@@ -28,12 +28,12 @@ export function parseMultiDriveSeasonHandle(directoryId: string): number | null 
   return m ? Number(m[1]) : null;
 }
 
-const MAGNET_CAPABLE_PROVIDERS = new Set(["pan115", "guangya", "pan123"]);
+const MAGNET_CAPABLE_PROVIDERS = new Set(["pan115"]);
 
 export interface MultiDriveTargetSpec {
   kind: "tv" | "movie";
-  /** Category key in `drive.parents` ("tv" | "anime" | "movies"). */
-  categoryKey: "tv" | "anime" | "movies";
+  /** Category key in `drive.parents` ("tv" | "anime" | "movies" | "variety"). */
+  categoryKey: LibraryCategory;
   title: string;
   year: number | string;
   tmdbId: number;

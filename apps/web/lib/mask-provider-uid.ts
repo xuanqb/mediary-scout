@@ -1,4 +1,4 @@
-/** 设置页盘卡的 uid 展示归一:手机号形打码中段(天翼 loginName 去 @ 后缀)、
+/** 设置页盘卡的 uid 展示归一:手机号形打码中段、
  *  长随机串中段截断、短数字 id 原样。完整值放 title 悬停可见,展示层不泄手机号。 */
 export function maskProviderUid(uid: string): string {
   const v = (uid ?? "").trim();

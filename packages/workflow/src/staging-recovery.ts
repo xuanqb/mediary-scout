@@ -10,7 +10,6 @@ import {
   handleWorkflowRunFailure,
   resolveWorkerDeps,
   type AccountWorkerContext,
-  type MayStartRun,
   type QueuedType2WorkerResult,
   type ResolveAccountWorkerContext,
 } from "./worker.js";
@@ -72,7 +71,6 @@ export async function runQueuedStagingRecovery(
     now?: () => string;
     resolveAccountContext?: ResolveAccountWorkerContext;
     onAuthErrorFreeze?: (storageId: string, reason: string) => Promise<void>;
-    mayStartRun?: MayStartRun;
     /** Paces the drive calls made before the agent starts. Tests pass a fake one. */
     clock?: DriveClock;
     /** The worker's drive filter and claim callback when queued runs go side by side. */
@@ -80,7 +78,6 @@ export async function runQueuedStagingRecovery(
   },
 ): Promise<QueuedType2WorkerResult> {
   const now = input.now ?? (() => new Date().toISOString());
-  if (input.mayStartRun && !input.mayStartRun()) return { status: "idle" };
   const claimed = await claimNextQueuedRun(input.repository, "staging_recovery", now(), input.claim);
   if (!claimed) return { status: "idle" };
   let resolvedLlmConfig: { baseURL?: string; modelId?: string } | undefined = input.llmConfig;

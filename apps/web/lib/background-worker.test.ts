@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { QueueClaimOptions } from "@media-track/workflow";
-import { clearUpdateHold, inFlightCount, setUpdateHold } from "./update-hold";
 import {
   drainQueueOnce,
   startBackgroundWorker,
@@ -80,58 +79,6 @@ describe("drainQueueOnce — the in-process queue drainer (one tick)", () => {
     expect(runNext).toHaveBeenCalledTimes(1);
     expect(runScheduled).toHaveBeenCalledTimes(1);
   });
-
-  it("runs the auto-update check after the sweep and survives its failure", async () => {
-    const calls: string[] = [];
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      const drained = await drainQueueOnce({
-        runNext: async () => ({ status: "idle" }),
-        runScheduled: async () => void calls.push("sweep"),
-        autoUpdate: async () => {
-          calls.push("auto");
-          throw new Error("boom");
-        },
-      });
-      expect(drained).toBe(0);
-      expect(calls).toEqual(["sweep", "auto"]);
-      expect(error).toHaveBeenCalledWith(expect.stringContaining("auto-update check failed: boom"));
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  it("checks auto-update even when a failing drain and sweep came first", async () => {
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      const autoUpdate = vi.fn(async () => undefined);
-      await drainQueueOnce({
-        runNext: async () => {
-          throw new Error("queue down");
-        },
-        runScheduled: async () => {
-          throw new Error("sweep down");
-        },
-        autoUpdate,
-      });
-      expect(autoUpdate).toHaveBeenCalledTimes(1);
-    } finally {
-      error.mockRestore();
-    }
-  });
-
-  it("still checks auto-update when no drive is configured (it does not touch any drive)", async () => {
-    const runNext = vi.fn(async () => ({ status: "idle" as const }));
-    const runScheduled = vi.fn(async () => ({ outcomes: [] }));
-    const autoUpdate = vi.fn(async () => undefined);
-
-    const drained = await drainQueueOnce({ runNext, runScheduled, autoUpdate, isDriveConfigured: async () => false });
-
-    expect(drained).toBe(0);
-    expect(runNext).not.toHaveBeenCalled();
-    expect(runScheduled).not.toHaveBeenCalled();
-    expect(autoUpdate).toHaveBeenCalledTimes(1);
-  });
 });
 
 describe("startBackgroundWorker — the in-process worker loop (auto-drive)", () => {
@@ -187,25 +134,6 @@ describe("startBackgroundWorker — the in-process worker loop (auto-drive)", ()
     expect(runtime.recover).toHaveBeenCalledTimes(1); // only one loop started
   });
 
-  it("each tick also runs the runtime's auto-update check, counted as in flight", async () => {
-    let inFlightDuringCheck = -1;
-    const runtime = {
-      recover: vi.fn(async () => 0),
-      runNext: vi.fn(async () => ({ status: "idle" })),
-      runScheduled: vi.fn(async () => undefined),
-      autoUpdate: vi.fn(async () => {
-        inFlightDuringCheck = inFlightCount();
-      }),
-    };
-
-    startBackgroundWorker({ pollMs: 1000, runtime });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.autoUpdate).toHaveBeenCalledTimes(1);
-    expect(inFlightDuringCheck).toBe(1);
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(runtime.autoUpdate).toHaveBeenCalledTimes(2);
-  });
-
   it("keeps draining on each poll interval after the first tick", async () => {
     const runtime = {
       recover: vi.fn(async () => 0),
@@ -218,22 +146,6 @@ describe("startBackgroundWorker — the in-process worker loop (auto-drive)", ()
     const afterFirst = runtime.runNext.mock.calls.length;
     await vi.advanceTimersByTimeAsync(1000); // second tick fires
     expect(runtime.runNext.mock.calls.length).toBeGreaterThan(afterFirst);
-  });
-
-  it("counts a tick as in flight while it runs", async () => {
-    let seen = -1;
-    const runtime = {
-      recover: vi.fn(async () => 0),
-      runNext: vi.fn(async () => {
-        seen = inFlightCount();
-        return { status: "idle" };
-      }),
-      runScheduled: vi.fn(async () => undefined),
-    };
-    startBackgroundWorker({ pollMs: 1000, runtime });
-    await vi.advanceTimersByTimeAsync(0);
-    expect(seen).toBe(1);
-    expect(inFlightCount()).toBe(0);
   });
 
   it("each tick drains with the runtime's concurrency: runs on two drives overlap", async () => {
@@ -256,26 +168,6 @@ describe("startBackgroundWorker — the in-process worker loop (auto-drive)", ()
     await vi.advanceTimersByTimeAsync(0);
     expect(runtime.runScheduled).toHaveBeenCalledTimes(1);
   });
-
-  it("starts nothing while the update hold is on, and resumes once it is released", async () => {
-    const runtime = {
-      recover: vi.fn(async () => 0),
-      runNext: vi.fn(async () => ({ status: "idle" })),
-      runScheduled: vi.fn(async () => undefined),
-    };
-    setUpdateHold(Date.now(), 60_000);
-    try {
-      startBackgroundWorker({ pollMs: 1000, runtime });
-      await vi.advanceTimersByTimeAsync(3000);
-      expect(runtime.runNext).not.toHaveBeenCalled();
-      expect(runtime.runScheduled).not.toHaveBeenCalled();
-    } finally {
-      clearUpdateHold();
-    }
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(runtime.runNext).toHaveBeenCalled();
-    expect(runtime.runScheduled).toHaveBeenCalled();
-  });
 });
 
 describe("defaultRuntime — 巡检调度接线（IGNORE_TIME_GATE 特例已退役）", () => {
@@ -293,7 +185,6 @@ describe("defaultRuntime — 巡检调度接线（IGNORE_TIME_GATE 特例已退�
     vi.doMock("./workflow-runtime", () => ({
       runNextQueuedWorkflow: vi.fn(async () => ({ status: "idle" })),
       runScheduledType3: spy,
-      runAutoUpdateIfDue: vi.fn(async () => undefined),
       recoverOrphanedRuns: vi.fn(async () => 0),
       workerHasConfiguredDrive: vi.fn(async () => true),
       getWorkerConcurrency: vi.fn(async () => 1),
@@ -304,20 +195,6 @@ describe("defaultRuntime — 巡检调度接线（IGNORE_TIME_GATE 特例已退�
     return spy;
   }
 
-  async function loadDefaultRuntime(runAutoUpdateIfDue: ReturnType<typeof vi.fn>) {
-    vi.resetModules();
-    vi.doMock("./workflow-runtime", () => ({
-      runNextQueuedWorkflow: vi.fn(async () => ({ status: "idle" })),
-      runScheduledType3: vi.fn(async () => ({ outcomes: [] })),
-      runAutoUpdateIfDue,
-      recoverOrphanedRuns: vi.fn(async () => 0),
-      workerHasConfiguredDrive: vi.fn(async () => true),
-      getWorkerConcurrency: vi.fn(async () => 1),
-    }));
-    const { defaultRuntime } = await import("./background-worker");
-    return defaultRuntime();
-  }
-
   it("runNext passes the drain's claim options on; concurrency reads the 同时处理 setting", async () => {
     const runNextQueuedWorkflow = vi.fn(async () => ({ status: "idle" }));
     const getWorkerConcurrency = vi.fn(async () => 4);
@@ -326,7 +203,6 @@ describe("defaultRuntime — 巡检调度接线（IGNORE_TIME_GATE 特例已退�
       runNextQueuedWorkflow,
       getWorkerConcurrency,
       runScheduledType3: vi.fn(async () => ({ outcomes: [] })),
-      runAutoUpdateIfDue: vi.fn(async () => undefined),
       recoverOrphanedRuns: vi.fn(async () => 0),
       workerHasConfiguredDrive: vi.fn(async () => true),
     }));
@@ -336,13 +212,6 @@ describe("defaultRuntime — 巡检调度接线（IGNORE_TIME_GATE 特例已退�
     await runtime.runNext(claim);
     expect(runNextQueuedWorkflow).toHaveBeenCalledWith(claim);
     expect(await runtime.concurrency?.()).toBe(4);
-  });
-
-  it("autoUpdate → runAutoUpdateIfDue", async () => {
-    const spy = vi.fn(async () => undefined);
-    const runtime = await loadDefaultRuntime(spy);
-    await runtime.autoUpdate?.();
-    expect(spy).toHaveBeenCalledTimes(1);
   });
 
   it("runScheduled → runScheduledType3 无参调用（无 ignoreTimeGate，即使 env 残留 flag）", async () => {
@@ -400,7 +269,7 @@ describe("drainQueueOnce — several queued runs at once (the 同时处理 setti
   it("runs queued runs on different drives side by side, up to the setting", async () => {
     const q = fakeQueue([
       { id: "a", drive: "cs_115" },
-      { id: "b", drive: "cs_guangya" },
+      { id: "b", drive: "cs_quark" },
     ]);
     const runScheduled = vi.fn(async () => undefined);
     const drain = drainQueueOnce({ runNext: q.runNext, runScheduled, concurrency: async () => 2, pollMs: 1, sleep: poll });
@@ -413,7 +282,7 @@ describe("drainQueueOnce — several queued runs at once (the 同时处理 setti
     expect(runScheduled).toHaveBeenCalledTimes(1);
   });
 
-  it("starts a run queued while another drive's run is going (护肝人 on 115, then on 光鸭)", async () => {
+  it("starts a run queued while another drive's run is going (护肝人 on 115, then on 夸克)", async () => {
     const q = fakeQueue([{ id: "115", drive: "cs_115" }]);
     const drain = drainQueueOnce({
       runNext: q.runNext,
@@ -424,11 +293,11 @@ describe("drainQueueOnce — several queued runs at once (the 同时处理 setti
     });
 
     await until(() => q.events.includes("start 115"));
-    q.add({ id: "guangya", drive: "cs_guangya" });
-    await until(() => q.events.includes("start guangya"));
-    expect(q.events).toEqual(["start 115", "start guangya"]);
+    q.add({ id: "quark", drive: "cs_quark" });
+    await until(() => q.events.includes("start quark"));
+    expect(q.events).toEqual(["start 115", "start quark"]);
     q.finish("115");
-    q.finish("guangya");
+    q.finish("quark");
     expect(await drain).toBe(2);
   });
 

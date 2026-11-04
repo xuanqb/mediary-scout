@@ -21,6 +21,7 @@ function v2Result(over: Partial<RunAcquisitionV2WorkflowResult>): RunAcquisition
     stillMissing: [],
     obtained: [],
     providerAhead: [],
+    embyAvailable: [],
     auditEvents: [],
     ...over,
   };
@@ -145,6 +146,8 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
     expect(result.notification.trigger).toBe("scheduled");
     expect(result.notification.report?.status).toBe("airing");
     expect(result.notification.report?.newlyObtained).toEqual([]);
+    // Patrol no-op wrote nothing → downstream automation (SmartStrm) must stay quiet.
+    expect(result.notification.report?.landed).toBeUndefined();
   });
 
   it("type3 patrol: airing 但本次真收到新集 → 仍是 episodes_restored（不许把有效更新降噪掉）", () => {
@@ -163,6 +166,40 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
 
     expect(result.notification.kind).toBe("episodes_restored");
     expect(result.notification.report?.newlyObtained).toEqual(["E05"]);
+    // Real new file this run → automation webhook may fire.
+    expect(result.notification.report?.landed).toBe(true);
+  });
+
+  it("replace run: a replaced episode marks landed; a not_found-only run does not", () => {
+    const replaceV2 = (outcome: "replaced" | "not_found") =>
+      v2Result({
+        obtained: ["S01E01"],
+        replacement: {
+          results: [{ episode: "S01E01", outcome, note: "" }],
+          rejected: [],
+          oldFiles: [],
+          identified: true,
+        },
+      });
+    const replaced = bridgeV2WorkflowToResult({
+      title,
+      mode: "replace",
+      seasons: [{ seasonNumber: 1, totalEpisodes: 1, latestAiredEpisode: 1, qualityPreference: "4K" }],
+      v2: replaceV2("replaced"),
+      workflowRunId: "run-replaced",
+      now: () => "2026-11-04T00:00:00.000Z",
+    });
+    const notFound = bridgeV2WorkflowToResult({
+      title,
+      mode: "replace",
+      seasons: [{ seasonNumber: 1, totalEpisodes: 1, latestAiredEpisode: 1, qualityPreference: "4K" }],
+      v2: replaceV2("not_found"),
+      workflowRunId: "run-not-found",
+      now: () => "2026-11-04T00:00:00.000Z",
+    });
+
+    expect(replaced.notification.report?.landed).toBe(true);
+    expect(notFound.notification.report?.landed).toBeUndefined();
   });
 
   it("type3 patrol: 有已播缺集（partial）→ 仍是 episodes_restored（真缺集不降噪）", () => {
@@ -261,6 +298,7 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
         obtained: ["S01E01", "S01E02", "S01E03"],
         stillMissing: ["S02E01", "S02E02", "S02E03"],
         providerAhead: [],
+        embyAvailable: [],
         auditEvents: [],
       },
       workflowRunId: "run-x",
@@ -329,5 +367,30 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
     });
 
     expect(result.seasons[0]!.season.status).toBe("active");
+  });
+
+  it("Emby-only episodes are flagged availableInEmby — not obtained, not reported missing", () => {
+    const result = bridgeV2WorkflowToResult({
+      title,
+      mode: "type3",
+      seasons: [{ seasonNumber: 1, totalEpisodes: 3, latestAiredEpisode: 3, qualityPreference: "4K" }],
+      v2: v2Result({
+        missingBefore: ["S01E01", "S01E03"],
+        obtained: ["S01E03"],
+        stillMissing: ["S01E01"],
+        embyAvailable: ["S01E01", "S01E02"],
+      }),
+      workflowRunId: "run-x",
+      now: () => "2026-09-04T00:00:00.000Z",
+    });
+
+    const episodes = result.seasons[0]!.episodes;
+    const e1 = episodes.find((episode) => episode.episodeCode === "S01E01")!;
+    const e2 = episodes.find((episode) => episode.episodeCode === "S01E02")!;
+    expect(e1.availableInEmby).toBe(true);
+    expect(e1.obtained).toBe(false);
+    expect(e2.availableInEmby).toBe(true);
+    // E01 is Emby-present, so the report must not call it a gap.
+    expect(result.notification.report?.realMissing).not.toContain("E01");
   });
 });

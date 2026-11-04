@@ -475,8 +475,8 @@ export function runRepositoryContract(name: string, harness: RepoHarness): void 
       });
 
       describe("listLinkHistory", () => {
-        const share = "https://www.123pan.com/s/Ab-cD_12";
-        const otherShare = "https://www.123pan.com/s/OtherKey1";
+        const share = "https://115.com/s/Ab-cD_12";
+        const otherShare = "https://115.com/s/OtherKey1";
         /** A finished run of one work. Snapshot and attempt ids are per run (SQL primary keys). */
         function historyRun(input: {
           id: string;
@@ -514,7 +514,7 @@ export function runRepositoryContract(name: string, harness: RepoHarness): void 
                   snapshotId,
                   index,
                   title: `${input.id} ${c.key}`,
-                  type: "123" as const,
+                  type: "115" as const,
                   source: "pansou",
                   providerPayload: c.url === undefined ? {} : { url: c.url },
                 })),

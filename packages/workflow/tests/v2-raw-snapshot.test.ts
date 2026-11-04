@@ -457,16 +457,16 @@ describe("candidate post dates reach both agent read paths", () => {
             snapshotId: "snap_dates",
             index: 0,
             title: "黄泉的使者 (2026)",
-            type: "123",
+            type: "quark",
             source: "pansou",
-            providerPayload: { url: "https://www.123pan.com/s/Ab-cD_12", datetime: "2026-04-06T08:00:00Z" },
+            providerPayload: { url: "https://pan.quark.cn/s/Ab-cD_12", datetime: "2026-04-06T08:00:00Z" },
           },
           {
             id: "unknown",
             snapshotId: "snap_dates",
             index: 1,
             title: "未知日期",
-            type: "123",
+            type: "quark",
             source: "pansou",
             providerPayload: { datetime: "0001-01-01T00:00:00Z" },
           },
@@ -526,7 +526,7 @@ describe("candidate post dates reach both agent read paths", () => {
   });
 
   it("annotates both titles of one link from the candidate url, and searchResources returns the field", async () => {
-    const share = "https://www.123pan.com/s/Ab-cD_12";
+    const share = "https://pan.quark.cn/s/Ab-cD_12";
     const note = "近 30 天转过 31 次（最近 09-26），文件每次都被丢掉";
     const inner: ResourceProvider = {
       search: async ({ keyword }): Promise<ResourceSnapshot> => ({
@@ -540,7 +540,7 @@ describe("candidate post dates reach both agent read paths", () => {
             snapshotId: "snap_hist",
             index: 0,
             title: "黄泉的使者 (2026)",
-            type: "123",
+            type: "quark",
             source: "pansou",
             providerPayload: { url: share, datetime: "2026-09-01T00:00:00Z" },
           },
@@ -549,7 +549,7 @@ describe("candidate post dates reach both agent read paths", () => {
             snapshotId: "snap_hist",
             index: 1,
             title: "🎬 黄泉的使者 (2026) 已更新",
-            type: "123",
+            type: "quark",
             source: "pansou",
             providerPayload: { url: share, datetime: "2026-09-01T00:00:00Z" },
           },
@@ -558,9 +558,9 @@ describe("candidate post dates reach both agent read paths", () => {
             snapshotId: "snap_hist",
             index: 2,
             title: "别的链接",
-            type: "123",
+            type: "quark",
             source: "pansou",
-            providerPayload: { url: "https://www.123pan.com/s/OtherKey1", datetime: "2026-09-02T00:00:00Z" },
+            providerPayload: { url: "https://pan.quark.cn/s/OtherKey1", datetime: "2026-09-02T00:00:00Z" },
           },
         ],
       }),

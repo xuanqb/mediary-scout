@@ -144,6 +144,15 @@ describe("seasonBadgeState", () => {
       seasonBadgeState(season({ status: "completed", obtainedCount: 13, latestAiredEpisode: 12 })),
     ).toBe("complete");
   });
+
+  it("not missing when Emby covers the aired remainder (even with 0 drive-obtained)", () => {
+    expect(
+      seasonBadgeState(season({ status: "completed", obtainedCount: 0, inEmbyCount: 13 })),
+    ).toBe("complete");
+    expect(
+      seasonBadgeState(season({ status: "active", obtainedCount: 3, inEmbyCount: 2, latestAiredEpisode: 5 })),
+    ).toBe("airing");
+  });
 });
 
 describe("libraryWallState", () => {

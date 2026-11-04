@@ -1,7 +1,7 @@
 ---
 name: mediary-scout
 description: >-
-  操作本机运行的 Mediary Scout（自托管媒体获取 agent）——改配置、找片/下片、查库存与进度，全程走本地 HTTP API，无需打开桌面客户端。
+  操作自托管运行的 Mediary Scout（媒体获取 agent）——改配置、找片/下片、查库存与进度，全程走本地 HTTP API，无需打开网页。
   Use when the user wants to find, download, or track movies / TV shows / anime through Mediary Scout, check download progress, inspect their tracked library, change Mediary settings (quality / language / LLM / drives), or trigger a patrol sweep.
   触发词：「帮我找 XX」「帮我下 XX」「XX 下好了吗」「XX 下载到哪了」「我在追哪些剧」「我的库存」「缺哪几集」「把画质改成 4K」「改成中文字幕优先」「触发一次巡检」「跑一遍巡检」。
   Triggers: find/download a movie/show/anime, check download or acquisition progress, list what I'm tracking, show missing episodes, change quality preference to 4K, set preferred language, trigger/force a patrol, read or update Mediary Scout config.
@@ -20,8 +20,8 @@ description: >-
 cat ~/.mediary/agent.json
 ```
 
-- **文件不存在** → 桌面版用户：让用户打开 **Mediary Scout 桌面 app**（首启会生成 token 并写这个文件），然后重试。Docker 用户：这个文件要自己建，按仓库 `docs/agent-api.md` 的「开启 → Docker」三步来。
-- **文件存在但 curl connection refused** → 桌面版：app 没在运行，让用户启动 Mediary Scout 桌面 app。Docker：实例没在跑或这台电脑连不上它，让用户在部署目录看 `docker compose ps`，并确认 agent.json 里的地址从这台电脑能打开。
+- **文件不存在** → 这个文件要用户自己建，按仓库 `docs/agent-api.md` 的「开启」三步来。
+- **文件存在但 curl connection refused** → 实例没在跑，或这台电脑连不上它。让用户在部署目录看 `docker compose ps`，并确认 agent.json 里的地址从这台电脑能打开。
 - **文件存在且能连** → 继续。
 
 之后所有调用都用这两个变量：
@@ -53,7 +53,7 @@ BASE=$(jq -r .baseUrl ~/.mediary/agent.json)
 1. **409 歧义 → 交给用户挑，绝不瞎猜。** `acquire` 命中多个高分候选时返回 `409 { "candidates": [top5] }`。把候选（标题/年份/tmdbId）列给用户，让用户选一个，再带 `"tmdbId": <所选>` 重发同一 `acquire`。禁止自行替用户拍板。
 2. **脱敏值绝不回写。** `GET config` 里秘密字段只露尾 4 位或显示为 `***`（如 `"apiKey": "sk-***7f2a"`、`"tmdbApiKey": "***"`）。**任何以 `***` 开头或含 `***` 的值都禁止写回 `PUT config`**——服务端会 400，且回写会毁掉真凭据。
 3. **秘密字段只在用户明确给出新值时才写。** LLM apiKey、tmdbApiKey、prowlarr.apiKey、推送密钥等，只有用户在本次对话里明确提供了新的明文值，才放进 `PUT` body。用户没提就别碰这些字段。
-4. **storages 只读。** `GET config` 会列出 `storages`（id/brand/name，不含凭据）；`PUT config` 不接受 `storages`，改盘绑定要在桌面 app 里做。
-5. **未运行 / 未配置。** 端点隐身（返回 404、非预期结构）时：多半是 app 没运行或该环境没配 agent token——桌面版提示用户启动桌面 app；Docker 提示用户检查 `.env` 里的 `MEDIA_TRACK_AGENT_TOKEN` 是否设了、改后是否在部署目录跑过 `docker compose up -d`。别把 404 当「没找到片」（找片的「无匹配」也是 404，用返回体区分：有 `candidates` 是歧义，有 `matched`/`status` 是成功，纯 404 且带 no-token 语义是未启用）。
+4. **storages 只读。** `GET config` 会列出 `storages`（id/brand/name，不含凭据）；`PUT config` 不接受 `storages`，改盘绑定要在网页设置里做。
+5. **未运行 / 未配置。** 端点隐身（返回 404、非预期结构）时：多半是实例没运行或没配 agent token——提示用户检查 `.env` 里的 `MEDIA_TRACK_AGENT_TOKEN` 是否设了、改后是否在部署目录跑过 `docker compose up -d`。别把 404 当「没找到片」（找片的「无匹配」也是 404，用返回体区分：有 `candidates` 是歧义，有 `matched`/`status` 是成功，纯 404 且带 no-token 语义是未启用）。
 
 完整请求/响应 schema、全部错误码（404 无 token / 无匹配、401 token 错、409 候选、403 demo、400 校验）、字段级说明见 `references/api.md`。

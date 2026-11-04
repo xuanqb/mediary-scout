@@ -1,39 +1,29 @@
 /**
- * 阿里云盘族 (Alibaba cloud-drive family) HTTP client — 夸克 and UC share ONE
- * protocol. Originally quark-only; UC joined 2026-10-23 after live probing
- * proved every layer identical (share token → detail → save → poll, the same
- * `{code, message, data}` envelope, and even the same dead-cookie code 31001).
- * The two differ ONLY in host / fixed query / UA / referer — everything below
- * is driven by a `CloudDriveProfile`, never by a brand `if`.
- *
- * Cookie auth at `<baseUrl>`, JSON bodies, response shape
- * `{code, message, data}` where `code===0` is success. No signature params
- * (kps/sign/vcode) are needed — the cookie alone authenticates.
+ * 夸克网盘 HTTP client — cookie auth at the fixed base URL, JSON bodies,
+ * response shape `{code, message, data}` where `code===0` is success. No
+ * signature params (kps/sign/vcode) are needed — the cookie alone authenticates.
  *
  * 转存 (the 115-秒传 equivalent) is a 4-step chain: share token → share detail →
- * save → poll task. Magnet/offline has NO usable web API on quark, and on UC it
- * is gated behind a runtime-injected `window.encryption` (see the brand
- * evaluation ledger), so it lives in the executor's fail-loud path, not here.
+ * save → poll task. Magnet/offline has NO usable web API on 夸克, so it lives in
+ * the executor's fail-loud path, not here.
  */
 
 import { parseFiniteMetric } from "./domain.js";
 import { fetchWithTimeout } from "./fetch-with-timeout.js";
 
-/** The per-brand half of the family protocol: everything that actually differs. */
+/** The protocol profile: host, fixed query, UA and referer. */
 export interface CloudDriveProfile {
   /** Brand key — also the StorageProvider id. */
-  key: "quark" | "uc";
+  key: "quark";
   /** Human label used in error messages. */
   label: string;
   baseUrl: string;
-  /** Fixed query string every pc-web call carries for this brand. The two are
-   *  NOT interchangeable: sending quark's `pr=ucpro&fr=pc&uc_param_str=` to UC
-   *  returns 403 code=41027 分享不存在 (verified live 2026-10-23). */
+  /** Fixed query string every pc-web call carries. */
   query: string;
   userAgent: string;
   referer: string;
   origin: string;
-  /** Uppercase prefix for thrown error codes (QUARK_… / UC_…). */
+  /** Uppercase prefix for thrown error codes. */
   errorPrefix: string;
   /** Stable browser-site host a user pastes a share link from (docs/UI only). */
   shareHostPattern: RegExp;
@@ -43,7 +33,7 @@ export interface CloudDriveProfile {
  * Anchor a share-host pattern so it can only match at a real host boundary.
  * Without this, an unanchored `pan\.quark\.cn\/s\/…` accepts BOTH
  * `https://evilpan.quark.cn/s/x` (a lookalike registrable domain) and
- * `https://attacker.com/drive.uc.cn/s/x` (a path substring) — either would become
+ * `https://attacker.com/pan.quark.cn/s/x` (a path substring) — either would become
  * a "transferable" candidate that can never land. Leading whitespace is tolerated
  * (pasted links often carry it); anything else must be the URL's very start.
  */
@@ -66,31 +56,13 @@ export const QUARK_PROFILE: CloudDriveProfile = {
   shareHostPattern: SHARE_HOST(/pan\.quark\.cn\/s\/([0-9a-zA-Z]+)(?:[?#]([^#]*))?/),
 };
 
-/** UC profile — captured live 2026-10-23 (drive.uc.cn web client 2.5.20). */
-export const UC_PROFILE: CloudDriveProfile = {
-  key: "uc",
-  label: "UC网盘",
-  baseUrl: "https://pc-api.uc.cn",
-  query: "pr=UCBrowser&fr=pc&sys=darwin&ve=1.8.6",
-  userAgent:
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
-    "uc-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 " +
-    "Safari/537.36 Channel/pckk_other_ch",
-  referer: "https://drive.uc.cn",
-  origin: "https://drive.uc.cn",
-  errorPrefix: "UC",
-  shareHostPattern: SHARE_HOST(/drive\.uc\.cn\/s\/([0-9a-zA-Z]+)(?:[?#]([^#]*))?/),
-};
-
 const DEFAULT_LIST_PAGE_SIZE = 50;
 const DEFAULT_POLL_ATTEMPTS = 12;
 const DEFAULT_POLL_DELAY_MS = 800;
 const DEFAULT_HTTP_TIMEOUT_MS = 20_000;
 
-/** Quark's "require login" code — the dead-cookie signal (HTTP 401, code 31001).
- *  UC uses the SAME code (verified live 2026-10-23: `401 {"code":31001,
- *  "message":"require login [guest]"}`), so one constant covers the family. */
-const FAMILY_AUTH_CODE = 31001;
+/** 夸克's "require login" code — the dead-cookie signal (HTTP 401, code 31001). */
+const AUTH_CODE = 31001;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -390,11 +362,10 @@ export class QuarkCookieClient {
   }
 }
 
-/** Extract the stable family account id from a cookie (`__uid=` preferred,
- *  `__kps=` fallback — both carry the same opaque per-account token). Verified
- *  live that UC uses the identical cookie key names, so one parser serves the
- *  whole family. Keys the instance-wide UNIQUE(provider, provider_uid). */
-export function parseCloudDriveUid(cookie: string): string | null {
+/** Extract the stable account id from a 夸克 cookie (`__uid=` preferred,
+ *  `__kps=` fallback — both carry the same opaque per-account token). Keys the
+ *  instance-wide UNIQUE(provider, provider_uid). */
+export function parseQuarkUid(cookie: string): string | null {
   const uid = /(?:^|;|\s)__uid=([^;]+)/.exec(cookie);
   if (uid?.[1]) {
     return uid[1].trim();
@@ -402,9 +373,6 @@ export function parseCloudDriveUid(cookie: string): string | null {
   const kps = /(?:^|;|\s)__kps=([^;]+)/.exec(cookie);
   return kps?.[1] ? kps[1].trim() : null;
 }
-
-/** Back-compat alias — 夸克 callers predate the family rename. */
-export const parseQuarkUid = parseCloudDriveUid;
 
 async function defaultFetchJson(url: string, init: QuarkHttpInit): Promise<unknown> {
   const requestInit: RequestInit = { method: init.method, headers: init.headers };
@@ -447,7 +415,7 @@ function familyOf(errorCode: string): string {
 }
 
 function isAuthFailure(code: number, message: string): boolean {
-  if (code === FAMILY_AUTH_CODE) {
+  if (code === AUTH_CODE) {
     return true;
   }
   return /require login|未登录|登录|登陆|relogin/i.test(message);

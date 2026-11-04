@@ -5,10 +5,12 @@ import {
   isMovieUnreleased,
   isRegisteredStorageProvider,
   isUserVisibleWorkflowKind,
+  libraryCategoryOf,
   prepareSeriesTarget,
   queueSeriesInitialization,
   queueTrackingInitialization,
   type EpisodeStatusCell,
+  type LibraryCategory,
   type MediaTitle,
   type PreparedSeriesTarget,
 } from "@media-track/workflow";
@@ -54,6 +56,8 @@ export interface TitleHubSeason {
   status: "active" | "completed" | null;
   obtainedCount: number;
   missingAiredCount: number;
+  /** Aired episodes present in Emby only (not drive-obtained). */
+  inEmbyCount: number;
   trackedSeasonId: string | null;
   episodes: Array<EpisodeStatusCell & { driveBadges?: EpisodeDriveBadge[] }>;
 }
@@ -63,6 +67,9 @@ export type { TitleAggregateState };
 export interface TitleHubView {
   kind: "tv";
   tmdbId: number;
+  /** Persisted media title id (`tmdb_tv_<id>`) — the manual-shelf override key. */
+  titleId: string;
+  libraryCategory: LibraryCategory;
   title: string;
   originalTitle: string;
   year: number;
@@ -83,6 +90,9 @@ export interface TitleHubView {
 export interface MovieHubView {
   kind: "movie";
   tmdbId: number;
+  /** Persisted media title id (`tmdb_movie_<id>`) — the manual-shelf override key. */
+  titleId: string;
+  libraryCategory: LibraryCategory;
   title: string;
   originalTitle: string;
   year: number;
@@ -90,8 +100,9 @@ export interface MovieHubView {
   posterPath: string | null;
   backdropPath: string | null;
   releaseDate: string | null;
-  /** acquired=已入库, reserved=未上映已预定, acquiring=获取中, missing=已上映未获取, untracked=未追踪. */
-  state: "acquired" | "reserved" | "acquiring" | "missing" | "untracked";
+  /** acquired=已入库, in_emby=Emby 已有, reserved=未上映已预定, acquiring=获取中,
+   *  missing=已上映未获取, untracked=未追踪. */
+  state: "acquired" | "in_emby" | "reserved" | "acquiring" | "missing" | "untracked";
   acquiring: boolean;
   /** The film's file is in the library. Not the same as state "acquired": while a run
    *  of the film is queued or running (a user's replace request keeps the old file)
@@ -304,6 +315,7 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
         status: allCompleted || allAiredObtained ? "completed" : "active",
         obtainedCount,
         missingAiredCount: view?.missingAiredCount ?? 0,
+        inEmbyCount: view?.inEmbyCount ?? 0,
         trackedSeasonId: tracked.season.id,
         episodes: episodesWithBadges,
       });
@@ -316,6 +328,7 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
         status: null,
         obtainedCount: 0,
         missingAiredCount: 0,
+        inEmbyCount: 0,
         trackedSeasonId: null,
         episodes: [],
       });
@@ -335,6 +348,8 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
   return {
     kind: "tv",
     tmdbId,
+    titleId: dbTitle?.id ?? target?.title.id ?? `tmdb_tv_${tmdbId}`,
+    libraryCategory: libraryCategoryOf(dbTitle ?? target?.title ?? { type: "tv" }),
     ...meta,
     aggregate,
     airing,
@@ -397,7 +412,16 @@ export async function getDetailView(
       }
     }
     const reserved = isMovieUnreleased(movieState.title.releaseDate, now);
-    const state = acquiring ? "acquiring" : reserved ? "reserved" : obtained ? "acquired" : "missing";
+    const inEmby = !obtained && movieStates.some((s) => s.episodes.some((episode) => episode.availableInEmby));
+    const state = acquiring
+      ? "acquiring"
+      : reserved
+        ? "reserved"
+        : obtained
+          ? "acquired"
+          : inEmby
+            ? "in_emby"
+            : "missing";
     return movieHubViewFromTitle(movieState.title, state, acquiring, obtained, driveBadges);
   }
 
@@ -441,6 +465,8 @@ function movieHubViewFromTitle(
   return {
     kind: "movie",
     tmdbId: title.tmdbId,
+    titleId: title.id,
+    libraryCategory: libraryCategoryOf(title),
     title: title.title,
     originalTitle: title.originalTitle,
     year: title.year,

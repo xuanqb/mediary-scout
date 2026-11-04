@@ -115,6 +115,54 @@ describe("runAcquisitionV2Workflow — outer orchestration (dirs → sync → ag
     expect(result.stillMissing).toEqual(["S01E02", "S01E03"]);
   });
 
+  it("Emby episodes narrow the search need but are never persisted as obtained", async () => {
+    const executor = new FakeStorageExecutor();
+    const result = await runAcquisitionV2Workflow({
+      provider: emptyProvider(),
+      executor,
+      model: searchThenReportModel(), // finds no new coverage
+      workflowRunId: "run-emby",
+      title: { name: "Show", year: 2024, aliases: [], tmdbId: 42 },
+      categoryParentId: "tv_root",
+      seasons: [{ seasonNumber: 1, latestAiredEpisode: 3 }],
+      qualityPreference: "1080p",
+      embyAvailableEpisodes: ["S01E01", "S01E02"],
+    });
+
+    // Only E03 is actually searched for...
+    expect(result.missingBefore).toEqual(["S01E03"]);
+    // ...and the Emby-only episodes are NOT written back as drive-verified obtained,
+    // nor reported as still missing.
+    expect(result.obtained).toEqual([]);
+    expect(result.stillMissing).toEqual(["S01E03"]);
+  });
+
+  it("skips the agent entirely when Emby already has every aired episode", async () => {
+    let modelCalled = false;
+    const model = new MockLanguageModelV3({
+      doGenerate: async () => {
+        modelCalled = true;
+        throw new Error("model should not be called when Emby has everything");
+      },
+    });
+    const result = await runAcquisitionV2Workflow({
+      provider: emptyProvider(),
+      executor: new FakeStorageExecutor(),
+      model,
+      workflowRunId: "run-emby-complete",
+      title: { name: "Show", year: 2024, aliases: [], tmdbId: 42 },
+      categoryParentId: "tv_root",
+      seasons: [{ seasonNumber: 1, latestAiredEpisode: 2 }],
+      qualityPreference: "1080p",
+      embyAvailableEpisodes: ["S01E01", "S01E02"],
+    });
+
+    expect(modelCalled).toBe(false);
+    expect(result.missingBefore).toEqual([]);
+    expect(result.obtained).toEqual([]);
+    expect(result.stillMissing).toEqual([]);
+  });
+
   it("records a staging_leaked audit event when the staging dir survives the harness cleanup (123 silent-no-op delete)", async () => {
     // 2026-09-20: 123's file/trash answered code:0 and deleted nothing; the
     // executor said {removed:true}; 80 staging dirs / ~1.4 TB piled up unseen.

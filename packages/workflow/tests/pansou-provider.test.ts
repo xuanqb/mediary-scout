@@ -168,75 +168,6 @@ describe("PanSouResourceProvider", () => {
     ]);
   });
 
-  it("recognizes UC share links as type 'uc' and keeps them out of a 夸克 drive", async () => {
-    // PanSou's real shape: data.results[] = {title, channel, links[{type,url,...}]}.
-    const payload = {
-      code: 0,
-      data: {
-        total: 3,
-        results: [
-          {
-            title: "UC 资源",
-            channel: "tg",
-            links: [
-              { type: "uc", url: "https://drive.uc.cn/s/ad26437c945f4", password: "" },
-              // rawType "uc" only NOMINATES; a lookalike host still fails the
-              // parser and is dropped rather than becoming an untransferable
-              // candidate the agent would burn a turn on.
-              { type: "uc", url: "https://evil-uc.cn.attacker.com/s/x", password: "" },
-            ],
-          },
-          { title: "夸克 资源", channel: "tg", links: [{ type: "quark", url: "https://pan.quark.cn/s/abc", password: "p" }] },
-        ],
-      },
-    };
-
-    const all = await new PanSouResourceProvider({
-      baseURL: "http://pansou.test",
-      maxSearchAttempts: 1,
-      fetchJson: async () => payload,
-    }).search({
-      keyword: "k",
-    });
-    // The real UC link + the quark link survive; the lookalike does not.
-    expect(all.candidates.map((c) => c.type).sort()).toEqual(["quark", "uc"]);
-
-    const ucOnly = await new PanSouResourceProvider({
-      baseURL: "http://pansou.test",
-      maxSearchAttempts: 1,
-      fetchJson: async () => payload,
-      allowedTypes: ["uc"],
-    }).search({ keyword: "k" });
-    expect(ucOnly.candidates).toHaveLength(1);
-    expect(ucOnly.candidates[0]?.type).toBe("uc");
-    expect(ucOnly.candidates[0]?.providerPayload.url).toBe("https://drive.uc.cn/s/ad26437c945f4");
-  });
-
-  it("classifies a UC URL by SHAPE even when PanSou mislabels rawType", async () => {
-    const provider = new PanSouResourceProvider({
-      baseURL: "http://pansou.test",
-      maxSearchAttempts: 1,
-      fetchJson: async () => ({
-        code: 0,
-        data: {
-          total: 2,
-          results: [
-            {
-              title: "mislabelled",
-              channel: "tg",
-              links: [
-                { type: "other", url: "https://drive.uc.cn/s/shapeonly123", password: "" },
-                { type: "other", url: "https://evil-uc.cn.attacker.com/s/x", password: "" },
-              ],
-            },
-          ],
-        },
-      }),
-    });
-    const result = await provider.search({ keyword: "k" });
-    expect(result.candidates.map((c) => c.type)).toEqual(["uc"]); // lookalike dropped
-  });
-
   it("recognizes quark links and filters candidates by allowedTypes (per-brand)", async () => {
     const fetchJson = async () => ({
       code: 0,
@@ -276,116 +207,6 @@ describe("PanSouResourceProvider", () => {
     });
     const ps = await pan115.search({ keyword: "k" });
     expect(ps.candidates.map((c) => c.type).sort()).toEqual(["115", "magnet"]);
-  });
-
-  it("recognizes tianyi links by rawType and by cloud.189.cn share-url shape", async () => {
-    const fetchJson = async () => ({
-      code: 0,
-      data: {
-        results: [
-          {
-            title: "剧 1080p",
-            channel: "c",
-            links: [
-              // PanSou-typed tianyi link (the probe-confirmed /t/<code> shape).
-              { type: "tianyi", url: "https://cloud.189.cn/t/AbCd12", password: "" },
-              // Loosely-typed links: the share-url shape must still win…
-              { type: "others", url: "https://cloud.189.cn/web/share?code=QzYnEr&accessCode=x1y2" },
-              // …but a non-share 189 URL (web portal) must NOT be classified tianyi.
-              { type: "others", url: "https://cloud.189.cn/web/main/" },
-              { type: "115", url: "https://115.com/s/a" },
-            ],
-          },
-        ],
-      },
-    });
-
-    // tianyi drive → only tianyi links (mirrors allowedResourceTypesForKinds(["pansou-tianyi"])).
-    const tianyiOnly = new PanSouResourceProvider({
-      baseURL: "https://pansou.example",
-      maxSearchAttempts: 1,
-      allowedTypes: ["tianyi"],
-      fetchJson,
-    });
-    const snapshot = await tianyiOnly.search({ keyword: "k" });
-    expect(snapshot.candidates.map((c) => c.type)).toEqual(["tianyi", "tianyi"]);
-    expect(snapshot.candidates.map((c) => c.providerPayload.url)).toEqual([
-      "https://cloud.189.cn/t/AbCd12",
-      "https://cloud.189.cn/web/share?code=QzYnEr&accessCode=x1y2",
-    ]);
-  });
-
-  it("recognizes 123 links by rawType and by 123 mirror-domain share-url shape", async () => {
-    const fetchJson = async () => ({
-      code: 0,
-      data: {
-        results: [
-          {
-            title: "剧 1080p",
-            channel: "c",
-            links: [
-              // PanSou-typed 123 link (canonical 123pan.com share shape).
-              { type: "123", url: "https://www.123pan.com/s/AbCd-12", password: "" },
-              // Loosely-typed links: the mirror-domain share shape must still win
-              // (domain set mirrors parsePan123ShareUrl: 123pan/123684/123865/123912 · com/cn)…
-              { type: "others", url: "https://www.123684.com/s/abc-1?pwd=x" },
-              // …but a non-123 URL must NOT be classified 123.
-              { type: "others", url: "https://cloud.189.cn/web/main/" },
-              { type: "115", url: "https://115.com/s/a" },
-            ],
-          },
-        ],
-      },
-    });
-
-    // 123 drive → only 123 links (mirrors allowedResourceTypesForKinds(["pansou-123"])).
-    const pan123Only = new PanSouResourceProvider({
-      baseURL: "https://pansou.example",
-      maxSearchAttempts: 1,
-      allowedTypes: ["123"],
-      fetchJson,
-    });
-    const snapshot = await pan123Only.search({ keyword: "k" });
-    expect(snapshot.candidates.map((c) => c.type)).toEqual(["123", "123"]);
-    expect(snapshot.candidates.map((c) => c.providerPayload.url)).toEqual([
-      "https://www.123pan.com/s/AbCd-12",
-      "https://www.123684.com/s/abc-1?pwd=x",
-    ]);
-  });
-
-  it("recognizes 光鸭 share links by rawType and by guangyapan.com/s/ shape, and keeps the password", async () => {
-    const fetchJson = async () => ({
-      code: 0,
-      data: {
-        results: [
-          {
-            title: "出入平安 (2024)",
-            channel: "c",
-            links: [
-              { type: "guangya", url: "https://www.guangyapan.com/s/1947864096514232347_amtV6IXLP9l33m6z", password: "" },
-              { type: "others", url: "https://www.guangyapan.com/s/1946057909719502939_amDq", password: "ab12" },
-              // The site root is not a share.
-              { type: "others", url: "https://www.guangyapan.com/" },
-              // A lookalike host is not 光鸭 even if PanSou calls it guangya (Copilot #271 r3).
-              { type: "guangya", url: "https://evilguangyapan.com/s/1947864096514232347_x" },
-              { type: "quark", url: "https://pan.quark.cn/s/abc" },
-            ],
-          },
-        ],
-      },
-    });
-    const guangyaOnly = new PanSouResourceProvider({
-      baseURL: "https://pansou.example",
-      maxSearchAttempts: 1,
-      allowedTypes: ["guangya"],
-      fetchJson,
-    });
-    const snapshot = await guangyaOnly.search({ keyword: "k" });
-    expect(snapshot.candidates.map((c) => c.type)).toEqual(["guangya", "guangya"]);
-    expect(snapshot.candidates.map((c) => c.providerPayload.url)).toEqual([
-      "https://www.guangyapan.com/s/1947864096514232347_amtV6IXLP9l33m6z",
-      "https://www.guangyapan.com/s/1946057909719502939_amDq",
-    ]);
   });
 
   it("returns an empty snapshot when PanSou reports a non-zero code", async () => {
@@ -590,10 +411,6 @@ describe("normalizeResourceType — URL shape beats the declared platform", () =
     ["115", "https://115.com/s/abc123"],
     ["115", "https://115cdn.com/s/abc123"],
     ["quark", "https://pan.quark.cn/s/abc123"],
-    ["uc", "https://drive.uc.cn/s/abc123"],
-    ["123", "https://www.123pan.cn/s/abcd"],
-    ["tianyi", "https://cloud.189.cn/t/aARrYvVBbiMb"],
-    ["guangya", "https://www.guangyapan.com/s/1961038051308896266_al17ELaa58LSIYXK"],
   ])("accepts a real %s share URL", (rawType, url) => {
     expect(normalizeResourceType(rawType, url)).toBe(rawType);
   });
@@ -602,10 +419,6 @@ describe("normalizeResourceType — URL shape beats the declared platform", () =
     ["115", "https://evil.example.com/whatever"],
     ["quark", "https://evil.example.com/pan.quark.cn/s/abc"],
     ["quark", "https://evilpan.quark.cn/s/abc"],
-    ["uc", "https://attacker.com/drive.uc.cn/s/x"],
-    ["123", "https://evil.example.com/x"],
-    ["tianyi", "https://evil.example.com/x"],
-    ["guangya", "https://evil.example.com/s/x"],
   ])("rejects a %s candidate whose URL is not a real share link (%s)", (rawType, url) => {
     expect(normalizeResourceType(rawType, url)).toBeNull();
   });
@@ -617,16 +430,12 @@ describe("normalizeResourceType — URL shape beats the declared platform", () =
   // share for some other brand: the shape is what the executor will act on.
   it.each([
     ["115", "https://pan.quark.cn/s/abc123", "quark"],
-    ["123", "https://pan.quark.cn/s/abc123", "quark"],
     ["quark", "https://115.com/s/abc123", "115"],
-    ["115", "https://drive.uc.cn/s/abc123", "uc"],
-    ["tianyi", "https://www.123pan.com/s/abcd-efg", "123"],
-    ["quark", "https://cloud.189.cn/t/aARrYvVBbiMb", "tianyi"],
   ])("classifies by URL shape even when rawType is mislabelled %s → %s", (rawType, url, want) => {
     expect(normalizeResourceType(rawType, url)).toBe(want);
   });
 
-  it.each(["115", "123", "tianyi", "quark", "uc", "guangya", "magnet"])(
+  it.each(["115", "quark", "magnet"])(
     "classifies a magnet as magnet even when rawType is %s",
     (rawType) => {
       expect(normalizeResourceType(rawType, "magnet:?xt=urn:btih:abc")).toBe("magnet");

@@ -25,6 +25,7 @@ import { runAcquisitionV2, type RunAcquisitionV2Request, type RunAcquisitionV2Re
 import type { JevJudge } from "./jev-judge.js";
 import { getQualityGuidance, getSearchRecipe } from "./acquisition-v2/search-profile.js";
 import { ensureMediaLibraryDirectory } from "./media-library-folder.js";
+import { libraryCategoryOf } from "./media-classification.js";
 
 function defaultNowIso(): string {
   return new Date().toISOString();
@@ -63,6 +64,9 @@ export interface RunMovieAcquisitionV2Request {
   /** Replace runs: the film was obtained before the run (its old file is there), so
    *  it stays obtained whether or not a replacement landed. Default false. */
   priorObtained?: boolean;
+  /** The film is already in the user's Emby library: skip the agent entirely.
+   *  Ignored on replace runs (the user explicitly asked to re-fetch). */
+  alreadyInEmby?: boolean;
   /** See orchestrator.protectExisting (episodes ["MOVIE"] when the film has a kept replacement). */
   protectExisting?: RunAcquisitionV2Request["protectExisting"];
   /** See orchestrator.rejectedLookup. */
@@ -105,6 +109,25 @@ export async function runMovieAcquisitionV2(
         year: request.title.year ?? "—",
         tmdbId: request.title.tmdbId,
       });
+
+  // Already in Emby: no search, no transfer. The film is flagged availableInEmby
+  // (NOT obtained — that state stays drive-verified). The directory above is
+  // still verify-or-created so the tracked record keeps a valid landing id.
+  if (request.alreadyInEmby && !request.userRequest) {
+    return buildResult({
+      request,
+      movieDirectoryId,
+      obtained: false,
+      availableInEmby: true,
+      status: "succeeded",
+      kind: "movie_init",
+      snapshots: [],
+      attempts: [],
+      decisions: [],
+      auditEvents: [],
+      now,
+    });
+  }
 
   const v2 = await runAcquisitionV2({
     provider: request.resourceProvider,
@@ -195,6 +218,8 @@ function buildResult(input: {
   request: RunMovieAcquisitionV2Request;
   movieDirectoryId: string;
   obtained: boolean;
+  /** Present in Emby only — skip report, never marked obtained. */
+  availableInEmby?: boolean;
   status: WorkflowStatus;
   kind: string;
   snapshots: ResourceSnapshot[];
@@ -218,10 +243,20 @@ function buildResult(input: {
     seasonNumber: 1,
     totalEpisodes: 1,
     latestAiredEpisode: 1,
-  }).map((episode) => ({ ...episode, obtained: input.obtained }));
+  }).map((episode) => ({
+    ...episode,
+    obtained: input.obtained,
+    ...(input.availableInEmby ? { availableInEmby: true } : {}),
+  }));
 
   const t = input.request.title;
-  const meta = { posterPath: t.posterPath ?? null, tmdbId: t.tmdbId, mediaType: t.type, year: t.year };
+  const meta = {
+    posterPath: t.posterPath ?? null,
+    tmdbId: t.tmdbId,
+    mediaType: t.type,
+    libraryCategory: libraryCategoryOf(t),
+    year: t.year,
+  };
   if (input.request.userRequest) {
     const report = buildReplacementReport({
       titleName: t.title,
@@ -239,7 +274,9 @@ function buildResult(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report,
+      report: (input.replacementResults ?? []).some((result) => result.outcome === "replaced")
+        ? { ...report, landed: true }
+        : report,
     };
     return {
       status: input.status,
@@ -264,15 +301,22 @@ function buildResult(input: {
   // was systemically blocked (115 云下载配额不足/登录过期), OR the search source
   // itself was down all run (源挂了 6 天却报「暂未找到资源」的那个真实案例) — say which.
   // 电影与剧集共用 emptyRunOutcome,所以这两条必须同时接,否则电影仍在撒谎。
-  const report = input.obtained
-    ? baseReport
-    : {
+  const report = input.availableInEmby
+    ? {
         ...baseReport,
-        ...emptyRunOutcome(
-          classifyTransferBlock(input.attempts)?.reason ?? null,
-          classifySearchSourceFault(input.auditEvents)?.reason ?? null,
-        ),
-      };
+        status: "complete" as const,
+        lines: ["Emby 已有，跳过获取"],
+      }
+    : input.obtained
+      ? baseReport
+      : {
+          ...baseReport,
+          ...emptyRunOutcome(
+            classifyTransferBlock(input.attempts)?.reason ?? null,
+            classifySearchSourceFault(input.auditEvents)?.reason ?? null,
+          ),
+        };
+  const landed = input.obtained && !input.availableInEmby;
   const notification: NotificationEvent = {
     id: `notification_${input.request.workflowRunId}`,
     workflowRunId: input.request.workflowRunId,
@@ -280,10 +324,10 @@ function buildResult(input: {
     // leading icon + daily-digest don't count it as 暂无资源.
     kind: report.status === "failed" ? "transfer_failed" : input.kind,
     title: input.request.title.title,
-    body: formatReportPushText(report),
+    body: formatReportPushText(landed ? { ...report, landed: true } : report),
     createdAt: input.now(),
     trigger: "user",
-    report,
+    report: landed ? { ...report, landed: true } : report,
   };
 
   return {

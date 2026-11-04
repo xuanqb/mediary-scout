@@ -10,24 +10,6 @@ describe("brand-aware storage skill", () => {
     expect(quark).toContain("夸克");
   });
 
-  it("getStorageSkill('uc') does NOT throw and teaches UC's own fail-loud codes + dead-link norm", () => {
-    // A missing arm here THROWS at runtime: the agent prompt tells it to
-    // readSkill("dead-links-black-box") on its first transfer failure, so a UC
-    // drive would crash mid-run instead of degrading.
-    const uc = getStorageSkill("uc");
-    expect(uc).toContain("UC网盘");
-    expect(uc).toContain("转存分享");
-    expect(uc).toMatch(/无磁力|NO magnet/i);
-    // UC's OWN live-verified codes, not 夸克's 41006.
-    expect(uc).toContain("41011"); // 分享地址已失效
-    expect(uc).toContain("41012"); // 好友已取消了分享
-    expect(uc).toContain("41027"); // 分享不存在
-    expect(uc).toContain("UC_NO_MAGNET");
-    // The 54%-dead reality must be stated, or the agent reads it as "no resources".
-    expect(uc).toMatch(/死链|dead/i);
-    expect(uc).not.toContain("QUARK_NO_MAGNET");
-  });
-
   it("getStorageSkill('pan115') keeps the 115 transfer model (秒传/magnet)", () => {
     const pan115 = getStorageSkill("pan115");
     expect(pan115).toContain("115");
@@ -36,88 +18,11 @@ describe("brand-aware storage skill", () => {
     expect(pan115).not.toContain("41006"); // 115 has no quark codes
   });
 
-  it("getStorageSkill('guangya') teaches the dual 光鸭分享 + 磁力/离线 model and does NOT throw", () => {
-    const guangya = getStorageSkill("guangya");
-    expect(guangya).toBeTruthy();
-    expect(guangya).toMatch(/光鸭/);
-    // two paths: its own share links (restore_share) and magnets (offline task)
-    expect(guangya).toContain("guangyapan.com/s/");
-    expect(guangya).toMatch(/磁力|magnet/i);
-    // the loud share failures + other brands' shares cannot land
-    expect(guangya).toContain("GUANGYA_SHARE_EMPTY");
-    expect(guangya).toContain("GUANGYA_UNSUPPORTED_LINK");
-    expect(guangya).not.toContain("GUANGYA_ONLY_MAGNET");
-    // the pending timeout is taught as "inspect first", not as a dead share (Copilot #271 r3)
-    expect(guangya).toMatch(/GUANGYA_RESTORE_TIMEOUT[\s\S]*no_target_change[\s\S]*inspectStaging/);
-    // must NOT carry quark fail-loud codes
-    expect(guangya).not.toContain("41006");
-  });
-
-  it("getStorageSkill('tianyi') teaches 转存分享, 无磁力, TIANYI_NO_MAGNET, and fail-loud share signals; does NOT throw", () => {
-    const tianyi = getStorageSkill("tianyi");
-    expect(tianyi).toBeTruthy();
-    expect(tianyi.length).toBeGreaterThan(0);
-    // share-transfer (SHARE_SAVE) drive, like 夸克 — the 115-秒传 equivalent
-    expect(tianyi).toContain("转存分享");
-    expect(tianyi).toMatch(/秒传/);
-    expect(tianyi).toContain("天翼");
-    expect(tianyi).toContain("cloud.189.cn");
-    // no magnet/offline API on 天翼 — a magnet fails loud with this sentinel
-    expect(tianyi).toMatch(/无磁力|NO magnet/i);
-    expect(tianyi).toContain("TIANYI_NO_MAGNET");
-    // a dead / expired / access-code-required share fails LOUD (switch candidate)
-    expect(tianyi).toMatch(/分享不存在|已失效|已过期|需要提取码|ShareNotFound/);
-    // must NOT carry 夸克's fail-loud code (different brand)
-    expect(tianyi).not.toContain("41006");
-  });
-
-  it("getStorageSkill('pan123') teaches dual 秒传 + native offline and both fail-loud paths", () => {
-    const pan123 = getStorageSkill("pan123");
-    expect(pan123).toBeTruthy();
-    expect(pan123.length).toBeGreaterThan(0);
-    // share-transfer drive (share/get 列文件 → file/copy/async 秒传复制), like 夸克/天翼
-    expect(pan123).toContain("转存分享");
-    expect(pan123).toMatch(/秒传/);
-    expect(pan123).toContain("123网盘");
-    expect(pan123).toContain("123pan.com");
-    // mirror share domains are real (123684/123865/123912) — the agent must not
-    // reject a candidate just because it is not on the main domain
-    expect(pan123).toMatch(/123684|镜像/);
-    expect(pan123).toMatch(/DUAL|native offline/i);
-    expect(pan123).toMatch(/磁力|magnet/i);
-    expect(pan123).toContain("PAN123_OFFLINE_RESOLVE_FAILED");
-    expect(pan123).toContain("PAN123_OFFLINE_FAILED");
-    expect(pan123).toContain("no_target_change");
-    expect(pan123).toContain("transferCandidate");
-    expect(pan123).not.toContain("For a movie or a missing TV need, use transferUntilLanded");
-    // a dead / cancelled / wrong-code share fails LOUD (switch candidate)
-    expect(pan123).toMatch(/分享不存在|已取消|已失效|已过期|提取码错误|链接失效/);
-    // the ONE dead-share message the code itself guarantees (saveShare's empty/dead
-    // reply) must be in the examples — the rest await T10 live calibration
-    expect(pan123).toContain("分享为空 / 已失效");
-    // transferUntilLanded accepts every fail-loud 123 share/magnet candidate and
-    // the arm recommends it for dead-link rotation.
-    expect(pan123).toMatch(/transferUntilLanded[^.]*(burns through|automatically)/);
-    expect(pan123).not.toMatch(/Do NOT use transferUntilLanded/i);
-    expect(pan123).not.toMatch(/115-share-only|it is 115/);
-    expect(pan123).toContain("transferCandidate");
-    // the third outcome (settle window exhausted on a big async copy) is taught:
-    // re-read before re-transferring or burning the candidate
-    expect(pan123).toContain("no_target_change");
-    // black-box gate keeps the publish-time heuristic (早于最新集=基本不含)
-    expect(pan123).toMatch(/publish time|发布时间/i);
-    // must NOT carry other brands' fail-loud codes / sentinels
-    expect(pan123).not.toContain("41006");
-    expect(pan123).not.toMatch(
-      /PAN123_NO_MAGNET|TIANYI_NO_MAGNET|QUARK_NO_MAGNET|GUANGYA_ONLY_MAGNET/,
-    );
-  });
-
   it("getStorageSkill throws for an unknown brand", () => {
     expect(() => getStorageSkill("baidu")).toThrowError(/unknown storage brand/i);
   });
 
-  it.each(["pan115", "quark", "guangya", "tianyi", "pan123"])(
+  it.each(["pan115", "quark"])(
     "%s teaches the systemic-block STOP rule (quota/auth = account problem, not a dead link)",
     (brand) => {
       const skill = getStorageSkill(brand);
@@ -135,9 +40,6 @@ describe("brand-aware storage skill", () => {
   it("readSkillSection selects the brand variant for dead-links-black-box", () => {
     expect(readSkillSection("dead-links-black-box", "quark")).toBe(getStorageSkill("quark"));
     expect(readSkillSection("dead-links-black-box", "pan115")).toBe(getStorageSkill("pan115"));
-    expect(readSkillSection("dead-links-black-box", "guangya")).toBe(getStorageSkill("guangya"));
-    expect(readSkillSection("dead-links-black-box", "tianyi")).toBe(getStorageSkill("tianyi"));
-    expect(readSkillSection("dead-links-black-box", "pan123")).toBe(getStorageSkill("pan123"));
     // defaults to 115 when no brand is given (single-user / legacy)
     expect(readSkillSection("dead-links-black-box")).toBe(getStorageSkill("pan115"));
   });
@@ -162,12 +64,6 @@ describe("brand-aware storage skill", () => {
         label: "夸克网盘",
         space: { totalBytes: 10 * 1024 ** 3, usedBytes: 1378 * 1024 ** 3 },
       },
-      {
-        storageId: "cs_123",
-        provider: "pan123",
-        label: "123网盘",
-        space: { totalBytes: 20 * 1024 ** 4, usedBytes: 2 * 1024 ** 4 },
-      },
     ];
     const block = buildMultiDriveAllocationBlock(drives, "cs_115");
     expect(block).toContain("## 你手上有这几块盘");
@@ -184,9 +80,8 @@ describe("brand-aware storage skill", () => {
     expect(protocolWithMulti).toContain("## 你手上有这几块盘");
     expect(protocolWithMulti).toContain("Evidence → Facts → Decision");
 
-    const deadLinksWithMulti = readSkillSection("dead-links-black-box", "pan115", drives, "cs_115");
+    const deadLinksWithMulti = readSkillSection("dead-links-black-box", "quark", drives, "cs_115");
     expect(deadLinksWithMulti).toContain("## 你手上有这几块盘");
     expect(deadLinksWithMulti).toContain("41006"); // quark manual included
-    expect(deadLinksWithMulti).toContain("PAN123_OFFLINE_FAILED"); // 123 manual included
   });
 });

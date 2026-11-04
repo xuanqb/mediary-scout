@@ -2,12 +2,19 @@ import { driveConnectionBadge } from "../../lib/settings-badge";
 import { maskProviderUid } from "../../lib/mask-provider-uid";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { Bell, Bot, Cable, CalendarClock, Clapperboard, ExternalLink, Gauge, KeyRound, Languages, Radio, ShieldCheck, Subtitles, TriangleAlert, Users } from "lucide-react";
+import { Bell, Bot, Cable, CalendarClock, Clapperboard, ExternalLink, Gauge, KeyRound, Languages, Radio, Send, ShieldCheck, Subtitles, TriangleAlert, Users } from "lucide-react";
 import { AppSidebar } from "../../components/app-sidebar";
 import { AddDriveBrandTabs } from "../../components/add-drive-brand-tabs";
+import { DriveLibraryDirsForm } from "../../components/drive-library-dirs-form";
 import { TestConnectionButton } from "../../components/test-connection-button";
 import { UnbindStorageButton } from "../../components/unbind-storage-button";
 import { PushNotificationForm } from "../../components/push-notification-form";
+import { AutomationWebhookForm } from "../../components/automation-webhook-form";
+import {
+  AUTOMATION_CONFIG_SETTING_KEY,
+  parseAutomationConfig,
+  readAutomationDeliveries,
+} from "../../lib/automation-webhook";
 import { PreferredLanguageForm } from "../../components/preferred-language-form";
 import { QualityPreferenceForm } from "../../components/quality-preference-form";
 import { LlmConfigForm } from "../../components/llm-config-form";
@@ -16,6 +23,7 @@ import { TmdbApiKeyForm } from "../../components/tmdb-api-key-form";
 import { AssrtTokenForm } from "../../components/assrt-token-form";
 import { ProwlarrConfigForm } from "../../components/prowlarr-config-form";
 import { HaisouConfigForm } from "../../components/haisou-config-form";
+import { EmbyConfigForm } from "../../components/emby-config-form";
 import { JevPrefilterForm } from "../../components/jev-prefilter-form";
 import { ServiceBlock } from "../../components/service-block";
 import { AgentMemoryNotes, AgentMemoryStats } from "../../components/agent-memory-panel";
@@ -26,7 +34,7 @@ import {
   memoryStatsForUi,
   toMemoryItem,
 } from "../../lib/agent-memory-server";
-import { assrtPills, haisouPills, isEnvBackedValue, jevPills, llmPills, pansouPills, prowlarrPills, tmdbPills } from "../../lib/service-status";
+import { assrtPills, embyPills, haisouPills, isEnvBackedValue, jevPills, llmPills, pansouPills, prowlarrPills, tmdbPills } from "../../lib/service-status";
 import { PanSouConfigForm } from "../../components/pansou-config-form";
 import { DailySweepForm } from "../../components/daily-sweep-form";
 import { PatrolConcurrencyForm } from "../../components/patrol-concurrency-form";
@@ -34,7 +42,6 @@ import { PatrolNowButton } from "../../components/patrol-now-button";
 import { SettingsTabs } from "../../components/settings-tabs";
 import { PasswordChangeForm } from "../../components/password-change-form";
 import { AccountAdminPanel } from "../../components/account-admin-panel";
-import { UpdateSection } from "../../components/settings/update-section";
 import { GitHubNameplate } from "../../components/github-nameplate";
 import { SettingsActionInbox } from "../../components/settings-action-inbox";
 import { loadSettingsAttentionSummary, markSettingsAttentionSeen } from "../../lib/settings-attention-server";
@@ -75,8 +82,12 @@ import {
   JEV_MODEL_SETTING_KEY,
   PANSOU_BASE_URL_SETTING_KEY,
   PANSOU_HEALTH_SETTING_KEY,
+  resolveLandedStoragePath,
+  EMBY_BASE_URL_SETTING_KEY,
+  EMBY_API_KEY_SETTING_KEY,
+  EMBY_LIBRARY_NAMES_SETTING_KEY,
+  parseEmbyLibraryNames,
   resolveGlobalWorkspace,
-  resolveIsDesktop,
 } from "../../lib/workflow-runtime";
 import {
   brandSupportsProwlarr,
@@ -113,7 +124,7 @@ export default function SettingsPage({
           <div className="settings-card">
             <p>
               🔭 这是只读演示站,不提供网盘连接、登录与任何写入设置。
-              想真正使用(连 夸克/UC/115/光鸭/123/天翼、配 LLM key、自定义画质/通知)请{" "}
+              想真正使用(连 115/夸克、配 LLM key、自定义画质/通知)请{" "}
               <a href="https://github.com/fancydirty/mediary-scout" target="_blank" rel="noreferrer">
                 自部署
               </a>
@@ -166,12 +177,10 @@ export default function SettingsPage({
                   <Suspense fallback={<div className="skeleton skeleton-heading" />}>
                     <PushNotificationSection />
                   </Suspense>
+                  <Suspense fallback={<div className="skeleton skeleton-heading" />}>
+                    <AutomationWebhookSection />
+                  </Suspense>
                 </>
-              }
-              update={
-                <Suspense fallback={null}>
-                  <UpdateSection />
-                </Suspense>
               }
               account={
                 <>
@@ -204,7 +213,7 @@ async function SettingsAttentionSection({
 }: {
   searchParams: Promise<{ w?: string }>;
 }) {
-  // Request-time only: account drives + LLM config + optional update probe.
+  // Request-time only: account drives + LLM config.
   // Loader resolves account/drives once (including optional ?w deep-link context).
   await connection();
   const { w } = await searchParams;
@@ -519,6 +528,11 @@ async function ResourceProviderSection() {
   const prowlarrBaseURL = (await repository.getSetting(PROWLARR_BASE_URL_SETTING_KEY)) ?? "";
   const prowlarrApiKeySet = Boolean((await repository.getSetting(PROWLARR_API_KEY_SETTING_KEY))?.trim());
   const haisouApiKeySet = Boolean((await repository.getSetting(HAISOU_API_KEY_SETTING_KEY))?.trim());
+  const embyBaseURL = (await repository.getSetting(EMBY_BASE_URL_SETTING_KEY)) ?? "";
+  const embyApiKeySet = Boolean((await repository.getSetting(EMBY_API_KEY_SETTING_KEY))?.trim());
+  const embyLibraryNames = parseEmbyLibraryNames(
+    await repository.getSetting(EMBY_LIBRARY_NAMES_SETTING_KEY),
+  );
   // The form shows DB state; the pill follows what the worker mounts (DB → env).
   const haisouFromEnv = !haisouApiKeySet && Boolean((await getHaisouApiKey(repository))?.trim());
   // The form shows the DB values; the pill follows what the worker mounts
@@ -531,7 +545,6 @@ async function ResourceProviderSection() {
   // connected_storages rows) so we never hide it from a working 115.
   const drives = await getAccountConnectedStorages();
   const showProwlarr = drives.length === 0 || drives.some((drive) => brandSupportsProwlarr(drive.provider));
-  const isDesktop = resolveIsDesktop();
   const magnetBrands = brandsSupportingProwlarr().join(" / ");
 
   return (
@@ -558,25 +571,15 @@ async function ResourceProviderSection() {
           envBaseURL: process.env.PANSOU_BASE_URL?.trim() ?? "",
           health: pansouHealth,
         })}
-        summary={
-          isDesktop
-            ? "未配置时用作者的公共实例，建议自建。"
-            : "默认内置、开箱即用；填地址可换成自建或公共实例。"
-        }
+        summary="默认内置、开箱即用；填地址可换成自建或公共实例。"
         details={
           <>
-            {isDesktop ? (
-              <p>
-                桌面端<b>不含</b> PanSou 容器。未在下方配置时，默认指向作者的公共实例（资源有限、偶尔不稳）。想要更丰富的网盘源（尤其 115 分享、4K），建议自建一个配好频道的 PanSou 实例，把地址填在下方。{" "}
-                <a href={PANSOU_SELF_HOST_TUTORIAL_URL} target="_blank" rel="noopener noreferrer">
-                  查看自建教程 <ExternalLink size={12} style={{ verticalAlign: "-1px" }} />
-                </a>
-              </p>
-            ) : (
-              <p>
-                PanSou 是默认的网盘资源搜索源（已内置、开箱即用）。docker compose 部署会自动指向自带的 PanSou 容器；想换成别的实例或公共域名时在此手填覆盖。留空则回退到环境变量 / 公共默认实例。
-              </p>
-            )}
+            <p>
+              PanSou 是默认的网盘资源搜索源（已内置、开箱即用）。docker compose 部署会自动指向自带的 PanSou 容器；想换成别的实例或公共域名时在此手填覆盖。留空则回退到环境变量 / 公共默认实例。{" "}
+              <a href={PANSOU_SELF_HOST_TUTORIAL_URL} target="_blank" rel="noopener noreferrer">
+                查看自建教程 <ExternalLink size={12} style={{ verticalAlign: "-1px" }} />
+              </a>
+            </p>
             <p>
               了解 PanSou{" "}
               <a href="https://github.com/fish2018/pansou" target="_blank" rel="noopener noreferrer">
@@ -589,9 +592,33 @@ async function ResourceProviderSection() {
         <PanSouConfigForm baseURL={pansouBaseURL} />
       </ServiceBlock>
       <ServiceBlock
+        name="Emby 联动"
+        pills={embyPills({ baseURL: embyBaseURL, apiKeySet: embyApiKeySet })}
+        summary="Emby 里已经有的集不再重复搜索；落盘后触发一次媒体库扫描。"
+        details={
+          <>
+            <p>
+              接入后,agent 每部剧开跑前会先问 Emby:这个 TMDB 号在对应媒体库里有哪几集。已有的集直接跳过,只补缺的,省掉重复搜索和重复落盘。整季/单片已经在 Emby 里时不会再去搜资源。
+            </p>
+            <p>
+              媒体库名称按 Emby 后台显示的名字填(默认 电影 / 电视剧 / 综艺 / 动漫)。我们是按名字找到库再按 TMDB id 认片,所以 Emby 里改过库名后这里也要跟着改。Emby 连不上时按「不知道」处理 —— 照常搜索,不会卡住整个流程。
+            </p>
+            <p>
+              留空地址并保存 = 关闭联动。地址和 Key 都只存本机数据库,不会发往别处。
+            </p>
+          </>
+        }
+      >
+        <EmbyConfigForm
+          baseUrl={embyBaseURL}
+          apiKeySet={embyApiKeySet}
+          libraryNames={embyLibraryNames}
+        />
+      </ServiceBlock>
+      <ServiceBlock
         name="海搜 (haisou)"
         pills={haisouPills({ apiKeySet: haisouApiKeySet || haisouFromEnv, fromEnv: haisouFromEnv })}
-        summary="补充源：自有索引（夸克 2.48 亿文件，光鸭/天翼也有量）。走站方官方 API，每天前 100 次免费。"
+        summary="补充源：自有索引（夸克 2.48 亿文件，115 也有量）。走站方官方 API，每天前 100 次免费。"
         details={
           <>
             <p>
@@ -661,11 +688,11 @@ async function SubtitleSourceSection() {
       <ServiceBlock
         name="assrt.net 字幕"
         pills={assrtPills({ tokenSet })}
-        summary="非国产内容自动补外挂中文字幕；需网盘支持外链离线（115 / 光鸭 / 123）。"
+        summary="非国产内容自动补外挂中文字幕；需网盘支持外链离线（115）。"
         details={
           <>
             <p>
-              外挂中文字幕来源：assrt.net（伪射手）有免费官方 API，agent 获取非国产剧集/电影时会自动搜字幕候选并挑合适的落盘到视频旁。需网盘支持外链离线落盘（115 / 光鸭 / 123 支持，123 会占用该账号的离线下载额度；夸克、UC、天翼没有可用的离线接口，不触发）。免费申请 Token，留空则该功能完全不启用。国产内容原生中文对白，不需要此功能。
+              外挂中文字幕来源：assrt.net（伪射手）有免费官方 API，agent 获取非国产剧集/电影时会自动搜字幕候选并挑合适的落盘到视频旁。需网盘支持外链离线落盘（115 支持；夸克没有可用的离线接口，不触发）。免费申请 Token，留空则该功能完全不启用。国产内容原生中文对白，不需要此功能。
             </p>
             <p>
               了解 assrt.net{" "}
@@ -709,7 +736,7 @@ async function Pan115Section() {
         </div>
         {(() => {
           // #93: derive the header badge from ALL drives — 115-only status made
-          // a 光鸭/夸克-only user read a permanent misleading 未连接.
+          // a 夸克-only user read a permanent misleading 未连接.
           const badge = driveConnectionBadge({ envConnected: status.connected && status.source === "env", drives });
           return (
             <span className={`hub-badge tone-${badge.tone}`}>
@@ -784,6 +811,9 @@ async function Pan115Section() {
                   <TestConnectionButton storageId={drive.id} />
                   <UnbindStorageButton storageId={drive.id} label={providerLabel(drive.provider)} />
                 </div>
+                {!frozen ? (
+                  <DriveLibraryDirsForm storageId={drive.id} initial={drive.libraryDirs} />
+                ) : null}
               </div>
             );
           })}
@@ -857,6 +887,61 @@ async function DailySweepSection() {
           上次巡检 {lastLabel} · 下次巡检 {nextSlot}
         </span>
       </div>
+    </section>
+  );
+}
+
+async function AutomationWebhookSection() {
+  await connection();
+  const accountId = await getCurrentAccountId();
+  const repository = getAccountScopedSettings(accountId);
+  const stored = parseAutomationConfig(
+    await repository.getOwnSetting(AUTOMATION_CONFIG_SETTING_KEY),
+  );
+  const config = { ...stored, secret: "" };
+  const deliveries = await readAutomationDeliveries(accountId);
+
+  // Test payload's path: the first connected drive's real layout, so the button
+  // exercises the same mount-prefix + shelf + title-folder shape as a real run.
+  const year = new Date().getFullYear();
+  let sampleStoragePath = `/115/影视/电影/示例影片 (${year}) {tmdb-0}`;
+  const drives = await getAccountConnectedStorages();
+  const firstDrive = drives[0];
+  if (firstDrive) {
+    try {
+      sampleStoragePath =
+        (await resolveLandedStoragePath({
+          accountId,
+          storageId: firstDrive.id,
+          category: "movies",
+          title: "示例影片",
+          year,
+          tmdbId: 0,
+        })) ?? sampleStoragePath;
+    } catch {
+      // Keep the generic sample; the form still explains the payload shape.
+    }
+  }
+
+  return (
+    <section className="panel" style={{ maxWidth: 720, marginTop: 24 }}>
+      <div className="panel-header">
+        <div>
+          <h2 className="panel-title">
+            <Send size={16} aria-hidden style={{ verticalAlign: "-2px", marginRight: 8 }} />
+            自动化 Webhook（SmartStrm）
+          </h2>
+          <p className="panel-note">
+            每次落盘后按目录触发 SmartStrm 的 a_task，同一目录合并为一次扫描
+          </p>
+        </div>
+      </div>
+      <AutomationWebhookForm
+        config={config}
+        secretSet={Boolean(stored.secret)}
+        sampleStoragePath={sampleStoragePath}
+        deliveries={deliveries}
+      />
     </section>
   );
 }

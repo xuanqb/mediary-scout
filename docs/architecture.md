@@ -8,14 +8,17 @@ flowchart LR
     Q --> W["进程内 worker"]
     W --> AG["沙盒 agent"]
     AG -->|搜索| SRC["PanSou / Prowlarr"]
-    AG -->|转存| DR["夸克 / 115 / 光鸭 / 123 / 天翼"]
+    AG -->|转存| DR["115 / 夸克"]
     AG -->|读回| DR
+    EMBY["Emby"] -->|已有集 / 电影| AG
+    AG -->|落盘后扫描| EMBY
+    W -->|按目录去抖| STRM["SmartStrm Webhook"]
     AG -->|验证并标记| Q
     Q -->|实时| UI
     CRON["定时巡检"] -->|只补缺集| Q
 ```
 
-- 状态存在 **Postgres**（Docker）或 **SQLite**（桌面版），worker 重启后任务能接着跑：agent 按网盘和数据库里的真实状态重来，不靠缓存的对话记录。
+- 状态存在 **Postgres**（Docker 部署；SQLite 仅用于开发与测试），worker 重启后任务能接着跑：agent 按网盘和数据库里的真实状态重来，不靠缓存的对话记录。
 - 影视信息来自 **TMDB**（内置代理兜底，开箱即用）；资源搜索用 **PanSou**，可选再接 **Prowlarr**（磁力 / 种子索引器）。
 
 更细的模块拆解见 [架构深度分析](architecture-deep-dive.md)（2026-06 的快照，部分细节已变）。

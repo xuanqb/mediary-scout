@@ -45,6 +45,7 @@ export interface ConnectedStorage {
   rootCid: string | null;
   moviesCid: string | null;
   tvCid: string | null;
+  varietyCid: string | null;
   animeCid: string | null;
   /** active = usable; frozen = cookie died (e.g. logged in elsewhere) → no
    *  acquisition and no patrol run for this drive until re-bound to the same uid.
@@ -66,6 +67,7 @@ export interface UpsertConnectedStorageInput {
   rootCid?: string | null;
   moviesCid?: string | null;
   tvCid?: string | null;
+  varietyCid?: string | null;
   animeCid?: string | null;
   createdAt: string;
 }
@@ -106,6 +108,7 @@ export interface ProvisionedCids {
   rootCid: string;
   moviesCid: string;
   tvCid: string;
+  varietyCid: string;
   animeCid: string;
 }
 
@@ -114,8 +117,8 @@ export interface ProvisionedCids {
  * parent, else create it. Safe to re-run on an already-provisioned 网盘 (the
  * second run finds every dir and creates nothing).
  *
- * Directory names are customisable (rootName / moviesName / tvName / animeName).
- * A blank or whitespace-only name falls back to its brand default — in
+ * Directory names are customisable (rootName / moviesName / tvName / varietyName /
+ * animeName). A blank or whitespace-only name falls back to its default — in
  * particular the root ALWAYS resolves to a real container folder, never to the
  * account root, so the drive's write scope can never widen to the whole account.
  */
@@ -125,13 +128,15 @@ export async function provisionCategoryDirs(input: {
   rootName?: string;
   moviesName?: string;
   tvName?: string;
+  varietyName?: string;
   animeName?: string;
 }): Promise<ProvisionedCids> {
   const named = (value: string | undefined, fallback: string) => value?.trim() || fallback;
-  const rootName = named(input.rootName, "Mediary Scout");
-  const moviesName = named(input.moviesName, "Movies");
-  const tvName = named(input.tvName, "TV");
-  const animeName = named(input.animeName, "Anime");
+  const rootName = named(input.rootName, "影视");
+  const moviesName = named(input.moviesName, "电影");
+  const tvName = named(input.tvName, "电视剧");
+  const varietyName = named(input.varietyName, "综艺");
+  const animeName = named(input.animeName, "动漫");
   const findOrCreate = async (name: string, parentId: string): Promise<string> => {
     const existing = (await input.storage.listChildDirs(parentId)).find((dir) => dir.name === name);
     return existing ? existing.id : input.storage.createDirectory({ name, parentId });
@@ -139,8 +144,9 @@ export async function provisionCategoryDirs(input: {
   const rootCid = await findOrCreate(rootName, input.baseParentId);
   const moviesCid = await findOrCreate(moviesName, rootCid);
   const tvCid = await findOrCreate(tvName, rootCid);
+  const varietyCid = await findOrCreate(varietyName, rootCid);
   const animeCid = await findOrCreate(animeName, rootCid);
-  return { rootCid, moviesCid, tvCid, animeCid };
+  return { rootCid, moviesCid, tvCid, varietyCid, animeCid };
 }
 
 /** Extract the stable 115 user id from a cookie string (`UID=<digits>_...`). */
@@ -205,6 +211,7 @@ export async function migrateLegacyCookieToDefaultAccount(input: {
     rootCid: env.MEDIA_TRACK_115_TEST_ROOT_CID ?? null,
     moviesCid: env.MEDIA_TRACK_MOVIES_PARENT_CID ?? null,
     tvCid: env.MEDIA_TRACK_TV_PARENT_CID ?? null,
+    varietyCid: env.MEDIA_TRACK_VARIETY_PARENT_CID ?? null,
     animeCid: env.MEDIA_TRACK_ANIME_PARENT_CID ?? null,
     createdAt: input.now,
   });

@@ -8,6 +8,9 @@ export interface AggregateSeasonInput {
   tracked: boolean;
   status: "active" | "completed" | null;
   obtainedCount: number;
+  /** Aired episodes present in Emby only — covered for the missing-badge, but
+   *  still not drive-obtained. */
+  inEmbyCount?: number;
   latestAiredEpisode: number;
   totalEpisodes: number;
 }
@@ -35,7 +38,7 @@ export function seasonBadgeState(season: AggregateSeasonInput): SeasonBadgeState
   if (!season.tracked) {
     return "untracked";
   }
-  if (season.obtainedCount < airedEpisodes(season)) {
+  if (season.obtainedCount + (season.inEmbyCount ?? 0) < airedEpisodes(season)) {
     return "missing";
   }
   return season.status === "active" ? "airing" : "complete";

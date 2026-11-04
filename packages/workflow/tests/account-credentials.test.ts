@@ -28,13 +28,13 @@ describe("resolveStorageBinding", () => {
 });
 
 describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
-  it("default root name is the brand 'Mediary Scout'; reuses same-name, creates missing", async () => {
+  it("uses the Chinese defaults; reuses same-name, creates missing", async () => {
     const created: string[] = [];
     const fakeStorage = {
       async listChildDirs(parentId: string) {
         return parentId === "ROOT"
-          ? [{ name: "Mediary Scout", id: "rootcid" }]
-          : [{ name: "Movies", id: "moviescid" }];
+          ? [{ name: "影视", id: "rootcid" }]
+          : [{ name: "电影", id: "moviescid" }];
       },
       async createDirectory({ name, parentId }: { name: string; parentId: string }) {
         const id = `new_${name}`;
@@ -43,11 +43,12 @@ describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
       },
     };
     const cids = await provisionCategoryDirs({ storage: fakeStorage, baseParentId: "ROOT" });
-    expect(cids.rootCid).toBe("rootcid"); // reused the brand-named root
+    expect(cids.rootCid).toBe("rootcid"); // reused the default-named root
     expect(cids.moviesCid).toBe("moviescid"); // reused under root
-    expect(cids.tvCid).toBe("new_TV"); // created
-    expect(cids.animeCid).toBe("new_Anime"); // created
-    expect(created).toEqual(["TV@rootcid", "Anime@rootcid"]);
+    expect(cids.tvCid).toBe("new_电视剧"); // created
+    expect(cids.varietyCid).toBe("new_综艺");
+    expect(cids.animeCid).toBe("new_动漫");
+    expect(created).toEqual(["电视剧@rootcid", "综艺@rootcid", "动漫@rootcid"]);
   });
 
   it("honors an explicit rootName override (regression)", async () => {
@@ -65,7 +66,7 @@ describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
     expect(created[0]).toBe("media-track-test"); // explicit value still wins
   });
 
-  it("honors custom root + category names (all four), creating them under the custom root", async () => {
+  it("honors custom root + category names (all five), creating them under the custom root", async () => {
     const created: string[] = [];
     const fakeStorage = {
       async listChildDirs() {
@@ -82,10 +83,16 @@ describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
       rootName: "我的影音库",
       moviesName: "电影",
       tvName: "剧集",
+      varietyName: "综艺",
       animeName: "番剧",
     });
     expect(created[0]).toBe("我的影音库@ROOT");
-    expect(created.slice(1)).toEqual(["电影@new_我的影音库", "剧集@new_我的影音库", "番剧@new_我的影音库"]);
+    expect(created.slice(1)).toEqual([
+      "电影@new_我的影音库",
+      "剧集@new_我的影音库",
+      "综艺@new_我的影音库",
+      "番剧@new_我的影音库",
+    ]);
     expect(cids.moviesCid).toBe("new_电影");
   });
 
@@ -106,14 +113,20 @@ describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
       rootName: "",
       moviesName: "   ",
       tvName: "",
+      varietyName: "",
       animeName: "",
     });
     // Safety: an empty rootName must NOT place categories at the account root.
-    // It falls back to the brand default and creates a real container folder.
-    expect(created[0]).toBe("Mediary Scout@0");
-    expect(cids.rootCid).toBe("new_Mediary Scout");
+    // It falls back to the default and creates a real container folder.
+    expect(created[0]).toBe("影视@0");
+    expect(cids.rootCid).toBe("new_影视");
     expect(cids.rootCid).not.toBe("0");
-    expect(created.slice(1)).toEqual(["Movies@new_Mediary Scout", "TV@new_Mediary Scout", "Anime@new_Mediary Scout"]);
+    expect(created.slice(1)).toEqual([
+      "电影@new_影视",
+      "电视剧@new_影视",
+      "综艺@new_影视",
+      "动漫@new_影视",
+    ]);
   });
 });
 

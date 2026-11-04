@@ -24,8 +24,8 @@ const stop = (text: string) => ({
   warnings: [],
 });
 
-const SHARE = "https://www.123pan.com/s/Ab-cD_12";
-const OTHER = "https://www.123pan.com/s/OtherKey1";
+const SHARE = "https://115.com/s/Ab-cD_12";
+const OTHER = "https://115.com/s/OtherKey1";
 
 function provider(): ResourceProvider {
   return {
@@ -40,7 +40,7 @@ function provider(): ResourceProvider {
           snapshotId: "snap_hades",
           index: 0,
           title: "黄泉的使者 (2026)",
-          type: "123",
+          type: "115",
           source: "pansou",
           providerPayload: { url: SHARE, datetime: "2026-09-01T00:00:00Z" },
         },
@@ -49,7 +49,7 @@ function provider(): ResourceProvider {
           snapshotId: "snap_hades",
           index: 1,
           title: "🎬 黄泉的使者 (2026) 已更新",
-          type: "123",
+          type: "115",
           source: "pansou",
           providerPayload: { url: SHARE, datetime: "2026-09-01T00:00:00Z" },
         },
@@ -58,7 +58,7 @@ function provider(): ResourceProvider {
           snapshotId: "snap_hades",
           index: 2,
           title: "空的",
-          type: "123",
+          type: "115",
           source: "pansou",
           providerPayload: { url: OTHER },
         },

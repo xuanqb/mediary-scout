@@ -288,7 +288,7 @@ describe("runner-v2 persist wrappers — V2 engine results persisted in the exis
           provider: "pan115",
           label: "115 网盘",
           storage: exec115,
-          parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root" },
+          parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root", variety: "115_variety_root" },
           space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 },
         },
         {
@@ -296,7 +296,7 @@ describe("runner-v2 persist wrappers — V2 engine results persisted in the exis
           provider: "uc",
           label: "UC网盘",
           storage: execUc,
-          parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root" },
+          parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root", variety: "uc_variety_root" },
           space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 },
         },
       ],

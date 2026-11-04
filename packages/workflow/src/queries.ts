@@ -9,12 +9,20 @@ import {
 } from "./domain.js";
 import type { WorkflowRepository } from "./repository.js";
 
-export type EpisodeDisplayState = "obtained" | "provider_ahead" | "missing_aired" | "unaired" | "unknown";
+export type EpisodeDisplayState =
+  | "obtained"
+  | "provider_ahead"
+  | "in_emby"
+  | "missing_aired"
+  | "unaired"
+  | "unknown";
 
 export interface EpisodeStatusCell {
   episodeCode: string;
   airStatus: AirStatus;
   obtained: boolean;
+  /** Present in Emby but not obtained on a connected drive (see EpisodeState). */
+  availableInEmby: boolean;
   metadataStatus: MetadataStatus;
   verifiedFileCount: number;
   displayState: EpisodeDisplayState;
@@ -34,6 +42,8 @@ export interface TrackedSeasonStatusView {
   providerAheadEpisodes: string[];
   obtainedCount: number;
   missingAiredCount: number;
+  /** Aired episodes present in Emby only (not on a connected drive). */
+  inEmbyCount: number;
   episodes: EpisodeStatusCell[];
 }
 
@@ -138,6 +148,7 @@ export async function getTrackedSeasonStatusView(input: {
   const providerAheadEpisodes = cells
     .filter((episode) => episode.displayState === "provider_ahead")
     .map((episode) => episode.episodeCode);
+  const inEmbyCount = cells.filter((episode) => episode.displayState === "in_emby").length;
 
   return {
     titleId: state.title.id,
@@ -151,6 +162,7 @@ export async function getTrackedSeasonStatusView(input: {
     providerAheadEpisodes,
     obtainedCount: obtainedEpisodes.length,
     missingAiredCount: missingAiredEpisodes.length,
+    inEmbyCount,
     episodes: cells,
   };
 }
@@ -160,6 +172,7 @@ function toEpisodeStatusCell(episode: EpisodeState): EpisodeStatusCell {
     episodeCode: episode.episodeCode,
     airStatus: episode.airStatus,
     obtained: episode.obtained,
+    availableInEmby: episode.availableInEmby === true,
     metadataStatus: episode.metadataStatus,
     verifiedFileCount: episode.verifiedFileIds.length,
     displayState: displayStateForEpisode(episode),
@@ -172,6 +185,11 @@ function displayStateForEpisode(episode: EpisodeState): EpisodeDisplayState {
   }
   if (episode.obtained) {
     return "obtained";
+  }
+  // Emby is a separate library: present there is NOT drive-obtained, but it is
+  // also not a gap the patrol should report or re-search.
+  if (episode.availableInEmby) {
+    return "in_emby";
   }
   if (episode.airStatus === "aired") {
     return "missing_aired";

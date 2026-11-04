@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { classifyMediaType } from "../src/index.js";
+import {
+  classifyLibraryCategory,
+  classifyMediaType,
+  libraryCategoryOf,
+} from "../src/index.js";
 
 describe("classifyMediaType", () => {
   it("classifies a Japanese animation series as anime", () => {
@@ -52,5 +56,32 @@ describe("classifyMediaType", () => {
   it("falls back to the base type when genre/origin are unknown", () => {
     expect(classifyMediaType({ baseType: "movie", genreIds: [], originCountries: [] })).toBe("movie");
     expect(classifyMediaType({ baseType: "tv", genreIds: [], originCountries: [] })).toBe("tv");
+  });
+});
+
+describe("classifyLibraryCategory — the four Emby shelves", () => {
+  it("keeps every film on 电影, animated or not", () => {
+    expect(classifyLibraryCategory({ mediaType: "movie", genreIds: [16] })).toBe("movies");
+    expect(classifyLibraryCategory({ mediaType: "movie", genreIds: [99] })).toBe("movies");
+  });
+
+  it("puts animated series on 动漫", () => {
+    expect(classifyLibraryCategory({ mediaType: "anime", genreIds: [16, 10759] })).toBe("anime");
+  });
+
+  it("puts variety/documentary/news/reality/talk series on 综艺", () => {
+    for (const genre of [99, 10763, 10764, 10767]) {
+      expect(classifyLibraryCategory({ mediaType: "tv", genreIds: [genre] })).toBe("variety");
+    }
+  });
+
+  it("puts every other series on 电视剧", () => {
+    expect(classifyLibraryCategory({ mediaType: "tv", genreIds: [18, 10759] })).toBe("tv");
+    expect(classifyLibraryCategory({ mediaType: "tv" })).toBe("tv");
+  });
+
+  it("a persisted override wins over the inferred category", () => {
+    expect(libraryCategoryOf({ type: "tv", libraryCategory: "variety" })).toBe("variety");
+    expect(libraryCategoryOf({ type: "anime" })).toBe("anime");
   });
 });

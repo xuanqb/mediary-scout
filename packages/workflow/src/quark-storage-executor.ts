@@ -1,14 +1,10 @@
 /**
- * 阿里云盘族 (Alibaba cloud-drive family) StorageExecutor — serves 夸克 AND UC over
- * the one shared QuarkCookieClient. UC joined 2026-10-23; the two differ only in
- * the client's CloudDriveProfile, so this class takes the profile instead of
- * being copied per brand.
+ * 夸克网盘 StorageExecutor over QuarkCookieClient.
  *
  * Differences from 115:
  *  - 转存 is a share-link chain (token→detail→save→poll). There is NO usable
- *    magnet/offline web API on either family member (UC's is gated behind a
- *    runtime-injected `window.encryption`), so a magnet candidate fails LOUD
- *    (QUARK_NO_MAGNET / UC_NO_MAGNET) instead of being attempted.
+ *    magnet/offline web API, so a magnet candidate fails LOUD (QUARK_NO_MAGNET)
+ *    instead of being attempted.
  *  - No one-shot breadcrumb, so the write-scope guard walks pdir_fid up
  *    (getFileInfo per hop, ≤ maxWriteScopeDepth) until it reaches a scope root.
  *  - An item is a directory when `dir === true`; files and dirs both key on `fid`.
@@ -19,7 +15,6 @@ import type { StorageExecutor, UnparsedVideoFile } from "./ports.js";
 import {
   isQuarkAuthError,
   QUARK_PROFILE,
-  UC_PROFILE,
   type CloudDriveProfile,
   type QuarkCookieClient,
   type QuarkItem,
@@ -28,10 +23,10 @@ import {
 const MAX_RECURSIVE_COLLECT_DEPTH = 6;
 const DEFAULT_MAX_WRITE_SCOPE_DEPTH = 8;
 const DEFAULT_MIN_VIDEO_SIZE_BYTES = 10 * 1024 * 1024;
-/** UC's folder listing lags ~900ms behind a create (measured 2026-10-23); a
- *  duplicate-name rejection is therefore expected on a re-provision and must be
- *  resolved by re-reading, not by failing. 6 × 400ms ≈ 2.4s, comfortably past
- *  the observed lag without stalling a run on a genuinely broken drive. */
+/** 夸克's folder listing can lag behind a create; a duplicate-name rejection is
+ *  therefore expected on a re-provision and must be resolved by re-reading, not
+ *  by failing. 6 × 400ms ≈ 2.4s, comfortably past the observed lag without
+ *  stalling a run on a genuinely broken drive. */
 const NAME_CONFLICT_RETRIES = 6;
 const NAME_CONFLICT_RETRY_DELAY_MS = 400;
 
@@ -431,7 +426,7 @@ export class QuarkStorageExecutor implements StorageExecutor {
    *  eyes (inspectStaging/inspectTargetDir) see every file, and cleanup targets
    *  are mostly NON-video (extra subtitles, ads, nfo). Verifying videos-only made
    *  deleting a subtitle impossible on every drive — caught live 2026-07-02 on
-   *  光鸭 (黑客帝国3 cleanup refused twice). */
+   *  another drive (黑客帝国3 cleanup refused twice). */
   private async assertFilesBelongToDirectory(directoryId: string, fileIds: string[]): Promise<void> {
     const verified = new Set((await this.listTree({ directoryId })).map((f) => f.providerFileId));
     const unverified = fileIds.filter((id) => !verified.has(id));
@@ -500,7 +495,7 @@ interface ParsedQuarkShare {
   passcode: string;
 }
 
-/** Generic share-URL parser for a family profile:
+/** Generic share-URL parser:
  *  `https://<host>/s/<pwd_id>[?passcode=xxx]` → its pwd_id + passcode. The host
  *  regex lives in the profile so a lookalike domain can never be mis-parsed. */
 export function parseCloudFamilyShareUrl(url: string, profile: CloudDriveProfile): ParsedQuarkShare | null {
@@ -515,11 +510,6 @@ export function parseCloudFamilyShareUrl(url: string, profile: CloudDriveProfile
 /** `https://pan.quark.cn/s/<pwd_id>[?passcode=xxx]` → its pwd_id + passcode. */
 export function parseQuarkShareUrl(url: string): ParsedQuarkShare | null {
   return parseCloudFamilyShareUrl(url, QUARK_PROFILE);
-}
-
-/** `https://drive.uc.cn/s/<pwd_id>[?pwd=xxx]` → its pwd_id + passcode. */
-export function parseUcShareUrl(url: string): ParsedQuarkShare | null {
-  return parseCloudFamilyShareUrl(url, UC_PROFILE);
 }
 
 function verifiedFileFromItem(

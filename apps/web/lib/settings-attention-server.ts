@@ -6,7 +6,6 @@ import {
   type WorkflowRepository,
 } from "@media-track/workflow";
 import { isDemoMode } from "./demo-mode";
-import { loadUpdateView } from "./update-view-server";
 import {
   ATTENTION_DISMISSED_KEY,
   ATTENTION_SEEN_AT_KEY,
@@ -21,7 +20,6 @@ import {
   getAccountScopedSettings,
   getCurrentAccountId,
   getWorkflowRepository,
-  isMultiUserEnabled,
   PANSOU_BASE_URL_SETTING_KEY,
   PANSOU_HEALTH_SETTING_KEY,
   resolveAgentModelConfig,
@@ -34,27 +32,6 @@ function brandLabel(provider: string): string {
   } catch {
     return provider;
   }
-}
-
-/** update_available is an instance-level signal (BUILD_COMMIT vs remote main):
- *  multi-user shows it to the owner only; single-user is the implicit owner. */
-async function resolveIsOwner(
-  repository: WorkflowRepository,
-  accountId: string,
-): Promise<boolean> {
-  // 单用户下经隧道来的匿名访客只要带任意 mt_session cookie 就能过 proxy(它只查
-  // 有无),getCurrentAccountId() 会把这样的请求解析成这个哨兵账号。哨兵绝不是站主——
-  // 否则匿名访客就能读更新日志尾、点「立即更新」。必须在放行单用户之前先挡掉。
-  if (accountId === UNAUTHENTICATED_ACCOUNT_ID) return false;
-  if (!isMultiUserEnabled()) return true;
-  const account = await repository.getAccountById(accountId);
-  return account?.isOwner ?? false;
-}
-
-/** Owner check for the current request's account (single-user = implicit owner). */
-export async function resolveCurrentIsOwner(): Promise<boolean> {
-  const repository = getWorkflowRepository();
-  return resolveIsOwner(repository, await getCurrentAccountId());
 }
 
 /** Attention bookkeeping is per-account ONLY — read via getAccountSetting
@@ -103,10 +80,7 @@ export async function loadSettingsAttentionSummary(options?: {
   // 判定用 llmConfigError === null（Copilot r2 C）：Boolean(baseURL && modelId)
   // 会把纯空白串当 truthy —— 空白 baseURL + 有值 modelId 的形态会被误标
   // configured、抑制提醒，而获取链路的 llmConfigError 会拒绝这种配置。
-  const [llm, isOwner] = await Promise.all([
-    resolveAgentModelConfig(getAccountScopedSettings(accountId)),
-    resolveIsOwner(repository, accountId),
-  ]);
+  const llm = await resolveAgentModelConfig(getAccountScopedSettings(accountId));
 
   // 自建搜索源:**只读 DB,绝不探活**。这个函数在徽章轮询路径上(每 8s 一次),
   // 在这里打网络等于每 8s 捶一遍用户的 PanSou。健康态有两个写入方:保存时探活
@@ -127,18 +101,8 @@ export async function loadSettingsAttentionSummary(options?: {
   // 没有结论时按「可达」处理:这条提醒只在有确凿失败证据时才响。宁可漏报也不
   // 能对着一个从没探过的源(老用户在本次改动之前保存的)天天报假警。
   const searchSourceReachable = (pansouHealth?.trim() ?? "") !== "" ? pansouHealth!.trim() === "ok" : true;
-  // update_available 只对站主存在（见 buildSettingsAttentionItems 的 isOwner
-  // 门控），所以非站主不该付这份代价。徽章每 8s 轮询：传 updaterStatus:false 跳过
-  // 更新助手往返，只问发布视图有没有更新的发行版。桌面也算——loadUpdateView 在桌面
-  // 走桌面发布源，有新安装包时同样给 available，徽章点进「更新」tab 下载。
-  const view = isOwner ? await loadUpdateView({ updaterStatus: false }) : null;
-  const availableUpdate = view?.available
-    ? { tag: view.available.tag, commit: view.available.commit, currentLabel: view.current.label }
-    : null;
-
   const items = buildSettingsAttentionItems({
     demo: false,
-    isOwner,
     drives: drives.map((drive) => ({
       id: drive.id,
       provider: drive.provider,
@@ -148,7 +112,6 @@ export async function loadSettingsAttentionSummary(options?: {
     brandLabel,
     llmConfigured: llmConfigError(llm) === null,
     searchSource: { custom: customSearchSource, reachable: searchSourceReachable },
-    availableUpdate,
     ...(workspace.activeStorageId ? { activeStorageId: workspace.activeStorageId } : {}),
   });
 

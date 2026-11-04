@@ -49,7 +49,7 @@ export interface HaisouResourceProviderOptions {
  *  这条路放进来」这种漂移。不在分类器覆盖范围内的盘（移动/联通/蓝奏/微云/
  *  城通）返回 null，直接丢弃：留成 unknown 只会让 agent 拿到一批永远转不了
  *  的候选。 */
-const ALL_PLATFORMS = ["quark", "uc", "115", "tianyi", "123", "guangya"] as const;
+const ALL_PLATFORMS = ["quark", "115"] as const;
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
@@ -126,8 +126,8 @@ export class HaisouResourceProvider implements ResourceProvider {
         body: JSON.stringify({
           query: keyword,
           // 必须显式传 `platforms`，否则上游按热度把结果挤成几乎全是夸克：
-          // 实测 24 个关键词不传时 quark 95.0% / tianyi 1.5% / **115 1.4%**，
-          // 而同一批关键词按平台分别查，115 有 101 条、UC 474 条、光鸭 201 条。
+          // 实测 24 个关键词不传时 quark 95.0% / **115 仅 1.4%**，
+          // 而同一批关键词按平台分别查，115 的结果远多于默认排序给出的数量。
           // 也就是说「海搜没有 115」是假象，是默认排序饿死了小平台。
           //
           // 成本不变：每块盘的 allowedTypes 本来就只有 1–2 个平台，所以还是

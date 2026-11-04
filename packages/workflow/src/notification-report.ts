@@ -1,6 +1,7 @@
 import { episodeNumberFromCode } from "./domain.js";
 import type {
   EpisodeState,
+  LibraryCategory,
   MediaType,
   NotificationEvent,
   NotificationReport,
@@ -54,7 +55,11 @@ interface SeasonFacts {
 
 function seasonFacts(season: TrackedSeason, episodes: EpisodeState[]): SeasonFacts {
   const aired = episodes.filter((episode) => episode.airStatus === "aired");
-  const realMissing = aired.filter((episode) => !episode.obtained).map((episode) => shortCode(episode.episodeCode));
+  // Episodes Emby already has are not gaps to report (they are deliberately not
+  // marked obtained — that state means drive-verified).
+  const realMissing = aired
+    .filter((episode) => !episode.obtained && !episode.availableInEmby)
+    .map((episode) => shortCode(episode.episodeCode));
   const obtained = episodes.filter((episode) => episode.obtained);
   const seasonFinished = season.latestAiredEpisode >= season.totalEpisodes;
   const fullyObtained = seasonFinished && realMissing.length === 0 && obtained.length >= season.totalEpisodes;
@@ -359,6 +364,7 @@ export interface NotificationTitleMeta {
   posterPath?: string | null;
   tmdbId?: number;
   mediaType?: MediaType;
+  libraryCategory?: LibraryCategory;
   year?: number;
 }
 

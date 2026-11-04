@@ -13,16 +13,14 @@ describe("resolveSettingsTab", () => {
     expect(resolveSettingsTab("services", false)).toBe("services");
   });
 
-  it("legacy 布尔第二参只表示「账号」tab 可见性，update 仍 fail-closed", () => {
-    // 旧调用点传布尔即「账号可见」；它不该顺带把 update 也放开。
+  it("legacy 布尔第二参只表示「账号」tab 可见性", () => {
     expect(resolveSettingsTab("account", true)).toBe("account");
-    expect(resolveSettingsTab("update", true)).toBe("drives");
+    expect(resolveSettingsTab("account", false)).toBe("drives");
   });
 
-  it("两个受观察 tab 的可见性彼此独立", () => {
-    expect(resolveSettingsTab("account", { account: true, update: false })).toBe("account");
-    expect(resolveSettingsTab("update", { account: false, update: true })).toBe("update");
-    expect(resolveSettingsTab("account", { account: false, update: true })).toBe("drives");
+  it("受观察 tab 的可见性决定深链是否可达", () => {
+    expect(resolveSettingsTab("account", { account: true })).toBe("account");
+    expect(resolveSettingsTab("account", { account: false })).toBe("drives");
   });
 
   it("未知/缺失 → 默认 drives", () => {
@@ -54,25 +52,13 @@ describe("settingsTabQuery", () => {
   });
 });
 
-describe("update tab", () => {
-  it("is listed after 巡检与通知", () => {
-    const ids = SETTINGS_TABS.map((tab) => tab.id);
-    expect(ids.indexOf("update")).toBe(ids.indexOf("patrol") + 1);
-  });
-  it("is observed: a deep link falls back to drives until its slot renders", () => {
-    expect(resolveSettingsTab("update", {})).toBe("drives");
-    expect(resolveSettingsTab("update", { update: true })).toBe("update");
-  });
-});
-
 describe("SETTINGS_TABS", () => {
-  it("六个 tab、顺序与标签固定", () => {
+  it("五个 tab、顺序与标签固定", () => {
     expect(SETTINGS_TABS.map((tab) => tab.id)).toEqual([
       "drives",
       "services",
       "preferences",
       "patrol",
-      "update",
       "account",
     ]);
     expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual([
@@ -80,12 +66,11 @@ describe("SETTINGS_TABS", () => {
       "资源与服务",
       "获取偏好",
       "巡检与通知",
-      "更新",
       "账号",
     ]);
   });
 
-  it("受观察（内容为空即隐藏）的 tab 就是 account + update", () => {
-    expect([...OBSERVED_SETTINGS_TABS]).toEqual(["account", "update"]);
+  it("受观察（内容为空即隐藏）的 tab 就是 account", () => {
+    expect([...OBSERVED_SETTINGS_TABS]).toEqual(["account"]);
   });
 });

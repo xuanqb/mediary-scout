@@ -41,20 +41,18 @@ describe("RealResourceProviderV2 — rejected resources", () => {
     expect(view.candidates.map((c) => c.id)).toEqual(["s2-3"]);
   });
 
-  it("a rejected 夸克 / 天翼 share is dropped by its share id — under any passcode — and other shares of the same title stay", async () => {
+  it("a rejected 夸克 share is dropped by its share id — under any passcode — and other shares of the same title stay", async () => {
     const adapter = new RealResourceProviderV2({
       provider: {
         search: async () => snapshotOf("snap_q", [
           { id: "quark_same", title: "奥德赛 2026 4K", url: "https://pan.quark.cn/s/1a2B3c4D?pwd=zzzz" },
           { id: "quark_other", title: "奥德赛 2026 4K", url: "https://pan.quark.cn/s/9z8Y7x6W" },
-          { id: "tianyi_same", title: "奥德赛 2026", url: "https://cloud.189.cn/web/share?code=QvEjYz3m&pwd=8fd2" },
         ]),
       },
       registry: new CandidateRegistry(), workflowRunId: "r",
       rejectedResources: {
         list: async () => [
           { linkKey: "quark:1a2B3c4D", label: "The.Odyssey.2026.2160p.mkv", sizeBytes: null },
-          { linkKey: "tianyi:QvEjYz3m", label: "The.Odyssey.2026.1080p.mkv", sizeBytes: null },
         ],
       },
     });

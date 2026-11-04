@@ -132,7 +132,7 @@ describe("describeAgentRunError", () => {
 
   it("never maps a brand 429 status code to the LLM rate-limit guidance", () => {
     // 网盘 API 自己返回 429 时同样不能改写(品牌标记优先)
-    const err = Object.assign(new Error("Pan123AuthError: too many requests"), { statusCode: 429 });
+    const err = Object.assign(new Error("QuarkAuthError: too many requests"), { statusCode: 429 });
     expect(describeAgentRunError(err)).toBe(err.message);
   });
 
@@ -158,20 +158,9 @@ describe("describeAgentRunError", () => {
 });
 
 // C3 (Copilot #51): the LLM-auth classifier must NOT swallow netdisk (brand) auth
-// errors. They carry "401"/"403" in their message (e.g. GUANGYA_AUTH_FAILED: 401
-// after refresh) but are a 网盘 token problem, not an AI-模型 problem — showing the
+// errors. They carry "401"/"403" in their message (e.g. QUARK_AUTH_FAILED: 401) but are a 网盘 token problem, not an AI-模型 problem — showing the
 // "AI 模型鉴权失败" guidance for them is misleading.
 describe("describeAgentRunError — does NOT misclassify netdisk (brand) auth errors as LLM-auth", () => {
-  it("leaves a GuangYa 401 auth error UNCHANGED (not the AI 模型 message)", () => {
-    const msg = "GUANGYA_AUTH_FAILED: 401 after refresh (/file/list)";
-    expect(describeAgentRunError(new Error(msg))).toBe(msg);
-  });
-
-  it("leaves a GuangYa validate 401 error UNCHANGED", () => {
-    const msg = "GUANGYA_VALIDATE_FAILED: 401 after refresh";
-    expect(describeAgentRunError(new Error(msg))).toBe(msg);
-  });
-
   it("leaves a Quark 403 auth error UNCHANGED", () => {
     const msg = "QUARK_AUTH_FAILED: 需要验证 (code 403)";
     expect(describeAgentRunError(new Error(msg))).toBe(msg);
@@ -182,40 +171,27 @@ describe("describeAgentRunError — does NOT misclassify netdisk (brand) auth er
     expect(describeAgentRunError(new Error(msg))).toBe(msg);
   });
 
-  it("leaves a Tianyi auth error UNCHANGED (dead session ≠ AI 模型 401)", () => {
-    const msg = "TIANYI_AUTH_FAILED: InvalidSessionKey (check ip error) 401";
+  it("leaves a Quark auth error UNCHANGED even when the upstream text says 'unauthorized'", () => {
+    // QuarkCookieClient throws `QUARK_AUTH_FAILED: ${upstream message}` — the
+    // upstream text can carry LLM-looking words; the brand prefix must win.
+    const msg = "QUARK_AUTH_FAILED: unauthorized (cookie 已失效)";
     expect(describeAgentRunError(new Error(msg))).toBe(msg);
   });
 
-  it("leaves a Pan123 auth error UNCHANGED even when the upstream text says 'unauthorized'", () => {
-    // Pan123Client throws `PAN123_AUTH_FAILED: ${upstream message}` — the upstream
-    // text can carry LLM-looking words; the brand prefix must win.
-    const msg = "PAN123_AUTH_FAILED: unauthorized (token 已失效)";
-    expect(describeAgentRunError(new Error(msg))).toBe(msg);
+  it("leaves a QuarkAuthError with a 401 statusCode UNCHANGED (dead cookie ≠ AI 模型 401)", () => {
+    const brand = Object.assign(new Error("QUARK_AUTH_FAILED: require login"), {
+      statusCode: 401,
+      name: "QuarkAuthError",
+    });
+    expect(describeAgentRunError(brand)).toBe("QUARK_AUTH_FAILED: require login");
   });
 
-  it("leaves a Pan123AuthError with a 401 statusCode UNCHANGED (dead 90-day token ≠ AI 模型 401)", () => {
-    const brand = Object.assign(new Error("PAN123_AUTH_FAILED: token expired"), {
+  it("leaves a Pan115 auth error with a 401 statusCode UNCHANGED (brand prefix wins)", () => {
+    const brand = Object.assign(new Error("PAN115_AUTH_FAILED: 登录失效"), {
       statusCode: 401,
-      name: "Pan123AuthError",
+      name: "Pan115AuthError",
     });
-    expect(describeAgentRunError(brand)).toBe("PAN123_AUTH_FAILED: token expired");
-  });
-
-  it("leaves a TianyiAuthError with a 401 statusCode UNCHANGED (brand prefix wins)", () => {
-    const brand = Object.assign(new Error("TIANYI_AUTH_FAILED: session invalid"), {
-      statusCode: 401,
-      name: "TianyiAuthError",
-    });
-    expect(describeAgentRunError(brand)).toBe("TIANYI_AUTH_FAILED: session invalid");
-  });
-
-  it("leaves a brand auth error with a 401 statusCode UNCHANGED (brand prefix wins)", () => {
-    const brand = Object.assign(new Error("GUANGYA_AUTH_FAILED: 401 after refresh"), {
-      statusCode: 401,
-      name: "GuangYaAuthError",
-    });
-    expect(describeAgentRunError(brand)).toBe("GUANGYA_AUTH_FAILED: 401 after refresh");
+    expect(describeAgentRunError(brand)).toBe("PAN115_AUTH_FAILED: 登录失效");
   });
 
   it("still maps a real AI-SDK 401 (no brand prefix) to the guidance", () => {

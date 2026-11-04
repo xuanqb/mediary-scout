@@ -1,7 +1,4 @@
-import { parseGuangYaShareUrl } from "./guangya-client.js";
-import { parseQuarkShareUrl, parseUcShareUrl } from "./quark-storage-executor.js";
-import { parsePan123ShareUrl } from "./pan123-storage-executor.js";
-import { parseTianyiShareUrl } from "./tianyi-storage-executor.js";
+import { parseQuarkShareUrl } from "./quark-storage-executor.js";
 import { createHash } from "node:crypto";
 import type {
   ResourceCandidate,
@@ -338,21 +335,6 @@ export function normalizeResourceType(_rawType: string, url: string): ResourceTy
   // candidate that then fails as unparseable at transfer time.
   if (parseQuarkShareUrl(url) !== null) {
     return "quark";
-  }
-  if (parseUcShareUrl(url) !== null) {
-    return "uc";
-  }
-  // 123 share shapes: multi-mirror domains 123pan/123684/123865/123912 · com/cn,
-  // path /s/<key>.
-  if (parsePan123ShareUrl(url) !== null) {
-    return "123";
-  }
-  // 天翼: cloud.189.cn/t/<code> and cloud.189.cn/web/share?…code=<code>.
-  if (parseTianyiShareUrl(url) !== null) {
-    return "tianyi";
-  }
-  if (parseGuangYaShareUrl(url) !== null) {
-    return "guangya";
   }
   return null;
 }

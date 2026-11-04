@@ -573,7 +573,7 @@ export interface ReflectionMemoryView {
   globalIndex: Array<{ name: string; kind: string; description: string; provider?: string | null }>;
 }
 
-/** " [drive: guangya]" for a drive-tagged note, "" otherwise (inside the fence). */
+/** " [drive: quark]" for a drive-tagged note, "" otherwise (inside the fence). */
 export function driveTag(provider: string | null | undefined): string {
   return provider ? ` [drive: ${stripMemoryFence(provider)}]` : "";
 }
@@ -584,7 +584,7 @@ export function buildReflectionDigest(input: {
   searches: SearchHistoryEntry[];
   /** The drive this run landed on — transfers/failures below are facts about IT. */
   drive?: string;
-  /** Its brand (pan115 / guangya / …), shown next to the opaque drive id. */
+  /** Its brand (pan115 / quark), shown next to the opaque drive id. */
   driveBrand?: string;
   attempts: Array<{
     candidateId: string;

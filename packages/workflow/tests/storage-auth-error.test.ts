@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { GuangYaAuthError, Pan115AuthError, Pan115RiskControlError } from "../src/index.js";
+import { Pan115AuthError, Pan115RiskControlError, QuarkAuthError } from "../src/index.js";
 import { isBrandStorageAuthError } from "../src/storage-auth-error.js";
 
 describe("isBrandStorageAuthError (品牌网盘鉴权错误 ≠ 落盘失败)", () => {
@@ -7,8 +7,8 @@ describe("isBrandStorageAuthError (品牌网盘鉴权错误 ≠ 落盘失败)", 
     expect(isBrandStorageAuthError(new Pan115AuthError("PAN115_AUTH_FAILED: x", 990001))).toBe(true);
   });
 
-  it("is true for a 光鸭 auth error (dead token)", () => {
-    expect(isBrandStorageAuthError(new GuangYaAuthError("GUANGYA_AUTH_FAILED: x"))).toBe(true);
+  it("is true for a 夸克 auth error (dead cookie)", () => {
+    expect(isBrandStorageAuthError(new QuarkAuthError("QUARK_AUTH_FAILED: x"))).toBe(true);
   });
 
   it("is false for a plain Error — an LLM `Unauthorized` must never freeze the drive", () => {

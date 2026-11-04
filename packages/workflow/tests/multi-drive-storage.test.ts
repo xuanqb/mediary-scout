@@ -52,7 +52,7 @@ function makeDrive(options: {
     provider: options.provider,
     label: options.label,
     storage: executor,
-    parents: { tv: "root", anime: "root", movies: "root" },
+    parents: { tv: "root", anime: "root", movies: "root", variety: "root" },
     space: options.space ?? { totalBytes: 20 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 },
   };
 }
@@ -62,21 +62,18 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
     const sim115 = new Storage115Simulator({
       packs: { c115: { files: [{ path: "Show.S01E01.mkv", sizeBytes: 1000 }] } },
     });
-    const sim123 = new Storage115Simulator({
-      packs: { c123: { files: [{ path: "Show.S01E02.mkv", sizeBytes: 1000 }] } },
+    const simQuark2 = new Storage115Simulator({
+      packs: { cq: { files: [{ path: "Show.S01E02.mkv", sizeBytes: 1000 }] } },
     });
-    const simUc = new Storage115Simulator({ packs: {} });
 
     const created115: string[] = [];
-    const created123: string[] = [];
-    const createdUc: string[] = [];
+    const createdQuark2: string[] = [];
 
     const drive115 = makeDrive({ storageId: "cs_115", provider: "pan115", label: "115 网盘", sim: sim115, createdDirs: created115 });
-    const drive123 = makeDrive({ storageId: "cs_123", provider: "pan123", label: "123网盘", sim: sim123, createdDirs: created123 });
-    const driveUc = makeDrive({ storageId: "cs_uc", provider: "uc", label: "UC网盘", sim: simUc, createdDirs: createdUc });
+    const driveQuark2 = makeDrive({ storageId: "cs_quark2", provider: "quark", label: "夸克网盘", sim: simQuark2, createdDirs: createdQuark2 });
 
     const coordinator = new MultiDriveStorageV2({
-      drives: [drive115, drive123, driveUc],
+      drives: [drive115, driveQuark2],
       target: {
         kind: "tv",
         categoryKey: "tv",
@@ -88,20 +85,18 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
       },
       buildDriveAdapter: (drive) => {
         if (drive.storageId === "cs_115") return sim115;
-        if (drive.storageId === "cs_123") return sim123;
-        return simUc;
+        return simQuark2;
       },
       resolveCandidate: (id) => {
         if (id === "c115") return { url: "https://115.com/s/sw3abcd1234" };
-        if (id === "c123") return { url: "https://www.123pan.com/s/Ab-cD_12" };
+        if (id === "cq") return { url: "https://pan.quark.cn/s/Ab-cD_12" };
         return undefined;
       },
     });
 
     // Before any transfer: ZERO directories created on any drive.
     expect(created115).toEqual([]);
-    expect(created123).toEqual([]);
-    expect(createdUc).toEqual([]);
+    expect(createdQuark2).toEqual([]);
 
     // Transfer 115 candidate → only 115 creates show + staging; Season 01 not created yet!
     const t1 = await coordinator.transferCandidate({
@@ -113,26 +108,24 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
       "cs_115:琅琊榜 (2015) {tmdb-65756}",
       "cs_115:staging-run_lazy",
     ]);
-    expect(created123).toEqual([]);
-    expect(createdUc).toEqual([]);
+    expect(createdQuark2).toEqual([]);
 
-    // Transfer 123 candidate → 123 lazily creates show + staging; UC still untouched!
+    // Transfer 夸克 candidate → 夸克 lazily creates show + staging; 115 still untouched!
     const t2 = await coordinator.transferCandidate({
-      candidateId: "c123",
+      candidateId: "cq",
       intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE,
     });
     expect(t2.status).toBe("succeeded");
-    expect(created123).toEqual([
-      "cs_123:琅琊榜 (2015) {tmdb-65756}",
-      "cs_123:staging-run_lazy",
+    expect(createdQuark2).toEqual([
+      "cs_quark2:琅琊榜 (2015) {tmdb-65756}",
+      "cs_quark2:staging-run_lazy",
     ]);
-    expect(createdUc).toEqual([]);
 
     // inspectStaging via MULTI_DRIVE_STAGING_HANDLE returns scoped file IDs and clean relative paths.
     const stagingTree = await coordinator.listTree({ directoryId: MULTI_DRIVE_STAGING_HANDLE });
     expect(stagingTree.map((f) => ({ id: f.id, path: f.path }))).toEqual([
       { id: "cs_115::file_3", path: "Show.S01E01.mkv" },
-      { id: "cs_123::file_3", path: "Show.S01E02.mkv" },
+      { id: "cs_quark2::file_3", path: "Show.S01E02.mkv" },
     ]);
 
     // Move files to Season 01 → each file moves into its own drive's lazily-created Season 01 dir.
@@ -142,8 +135,7 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
     });
     expect(moved.moved.length).toBe(2);
     expect(created115).toContain("cs_115:Season 01");
-    expect(created123).toContain("cs_123:Season 01");
-    expect(createdUc).toEqual([]);
+    expect(createdQuark2).toContain("cs_quark2:Season 01");
   });
 
   it("enforces the hard space gate: refuses over-quota drives (negative remaining) and oversized candidates", async () => {
@@ -237,17 +229,17 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
     const sim115 = new Storage115Simulator({
       packs: { c115: { files: [{ path: "Ep01.mkv", sizeBytes: 1000 }] } },
     });
-    const sim123 = new Storage115Simulator({
-      packs: { c123: { files: [{ path: "Ep02.mkv", sizeBytes: 1000 }] } },
+    const simQuark2 = new Storage115Simulator({
+      packs: { cq: { files: [{ path: "Ep02.mkv", sizeBytes: 1000 }] } },
     });
     const removed115: string[] = [];
-    const removed123: string[] = [];
+    const removedQuark2: string[] = [];
 
     const drive115 = makeDrive({ storageId: "cs_115", provider: "pan115", label: "115", sim: sim115, removedDirs: removed115 });
-    const drive123 = makeDrive({ storageId: "cs_123", provider: "pan123", label: "123", sim: sim123, removedDirs: removed123 });
+    const driveQuark2 = makeDrive({ storageId: "cs_quark2", provider: "quark", label: "夸克", sim: simQuark2, removedDirs: removedQuark2 });
 
     const coordinator = new MultiDriveStorageV2({
-      drives: [drive115, drive123],
+      drives: [drive115, driveQuark2],
       target: {
         kind: "tv",
         categoryKey: "tv",
@@ -257,11 +249,11 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
         seasons: [1],
         workflowRunId: "run_cleanup",
       },
-      buildDriveAdapter: (d) => (d.storageId === "cs_115" ? sim115 : sim123),
+      buildDriveAdapter: (d) => (d.storageId === "cs_115" ? sim115 : simQuark2),
       resolveCandidate: (id) =>
         id === "c115"
           ? { url: "https://115.com/s/sw3abcd1234" }
-          : { url: "https://www.123pan.com/s/Ab-cD_12" },
+          : { url: "https://pan.quark.cn/s/Ab-cD_12" },
     });
 
     const t1 = await coordinator.transferCandidate({
@@ -269,11 +261,11 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
       intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE,
     });
     const t2 = await coordinator.transferCandidate({
-      candidateId: "c123",
+      candidateId: "cq",
       intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE,
     });
 
-    // Suppose 115's file failed to move (in unmovedFileIds), while 123's file moved cleanly.
+    // Suppose 115's file failed to move (in unmovedFileIds), while 夸克's file moved cleanly.
     const keptEvents: Array<{ stagingDirectoryId: string; fileCount: number }> = [];
     await coordinator.cleanupMaterializedStagings({
       unmovedFileIds: new Set(t1.materializedFileIds),
@@ -282,9 +274,9 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
       onKept: (e) => keptEvents.push(e),
     });
 
-    // 115 staging was KEPT (not removed) because it holds an unmoved file; 123 staging was removed!
+    // 115 staging was KEPT (not removed) because it holds an unmoved file; 夸克 staging was removed!
     expect(removed115).toEqual([]);
-    expect(removed123.length).toBe(1);
+    expect(removedQuark2.length).toBe(1);
     expect(keptEvents.length).toBe(1);
     expect(keptEvents[0]!.fileCount).toBe(1);
     expect(t2.materializedFileIds.length).toBe(1);
@@ -297,25 +289,25 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
         c115_b: { files: [{ path: "Show.S01E02.mkv", sizeBytes: 1000 }] },
       },
     });
-    const sim123 = new Storage115Simulator({
+    const simQuark2 = new Storage115Simulator({
       packs: {
-        c123_a: { files: [{ path: "Show.S01E03.mkv", sizeBytes: 1000 }] },
-        c123_b: { files: [{ path: "Show.S01E04.mkv", sizeBytes: 1000 }] },
+        cq_a: { files: [{ path: "Show.S01E03.mkv", sizeBytes: 1000 }] },
+        cq_b: { files: [{ path: "Show.S01E04.mkv", sizeBytes: 1000 }] },
       },
     });
-    const created123: string[] = [];
+    const createdQuark2: string[] = [];
     const drive115 = makeDrive({ storageId: "cs_115", provider: "pan115", label: "115", sim: sim115 });
-    const drive123 = makeDrive({ storageId: "cs_123", provider: "pan123", label: "123", sim: sim123, createdDirs: created123 });
+    const driveQuark2 = makeDrive({ storageId: "cs_quark2", provider: "quark", label: "夸克", sim: simQuark2, createdDirs: createdQuark2 });
 
     const attempts115 = [
       { id: "run_dup_transfer_1", workflowRunId: "run_dup", candidateId: "c115_a", status: "succeeded" as const, providerMessage: "", materializedFileIds: ["f1"] },
     ];
-    const attempts123 = [
-      { id: "run_dup_transfer_1", workflowRunId: "run_dup", candidateId: "c123_a", status: "succeeded" as const, providerMessage: "", materializedFileIds: ["f3"] },
+    const attemptsQuark = [
+      { id: "run_dup_transfer_1", workflowRunId: "run_dup", candidateId: "cq_a", status: "succeeded" as const, providerMessage: "", materializedFileIds: ["f3"] },
     ];
 
     const coordinator = new MultiDriveStorageV2({
-      drives: [drive115, drive123],
+      drives: [drive115, driveQuark2],
       target: {
         kind: "tv",
         categoryKey: "tv",
@@ -326,7 +318,7 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
         workflowRunId: "run_dup",
       },
       buildDriveAdapter: (d) => {
-        const base = d.storageId === "cs_115" ? sim115 : sim123;
+        const base = d.storageId === "cs_115" ? sim115 : simQuark2;
         return {
           createDirectory: (i) => base.createDirectory(i),
           transferCandidate: (i) => base.transferCandidate(i),
@@ -338,37 +330,37 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
           deleteFiles: (i) => base.deleteFiles(i),
           removeDirectory: (i) => base.removeDirectory(i),
           candidateLinkKind: (c) => base.candidateLinkKind(c),
-          attempts: () => (d.storageId === "cs_115" ? attempts115 : attempts123),
+          attempts: () => (d.storageId === "cs_115" ? attempts115 : attemptsQuark),
         };
       },
       resolveCandidate: (id) =>
         id.startsWith("c115")
           ? { url: `https://115.com/s/sw3abcd${id}` }
-          : { url: `https://www.123pan.com/s/Ab-cD_${id}` },
+          : { url: `https://pan.quark.cn/s/Ab-cD_${id}` },
     });
 
-    // Fire two concurrent transfers onto drive 123 (simulating parallel tool calls in one LLM turn)
+    // Fire two concurrent transfers onto drive 夸克 (simulating parallel tool calls in one LLM turn)
     await Promise.all([
-      coordinator.transferCandidate({ candidateId: "c123_a", intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE, storageId: "cs_123" }),
-      coordinator.transferCandidate({ candidateId: "c123_b", intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE, storageId: "cs_123" }),
+      coordinator.transferCandidate({ candidateId: "cq_a", intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE, storageId: "cs_quark2" }),
+      coordinator.transferCandidate({ candidateId: "cq_b", intoDirectoryId: MULTI_DRIVE_STAGING_HANDLE, storageId: "cs_quark2" }),
     ]);
 
-    // Show directory and staging directory on 123 must each be created ONLY ONCE (no 5060 duplicate folder race)
-    expect(created123).toEqual([
-      "cs_123:幻视任务 (2026) {tmdb-213375}",
-      "cs_123:staging-run_dup",
+    // Show directory and staging directory on 夸克 must each be created ONLY ONCE (no 5060 duplicate folder race)
+    expect(createdQuark2).toEqual([
+      "cs_quark2:幻视任务 (2026) {tmdb-213375}",
+      "cs_quark2:staging-run_dup",
     ]);
 
     // TransferAttempt IDs from both drives must be globally unique (no transfer_attempts_pkey collision)
     const allAttempts = coordinator.attempts();
     expect(allAttempts.map((a) => a.id)).toEqual([
       "run_dup_transfer_cs_115_1",
-      "run_dup_transfer_cs_123_1",
+      "run_dup_transfer_cs_quark2_1",
     ]);
   });
 
-  it("discovers pre-existing season files on a secondary drive when primaryStorageId has none (issue #359: Tianyi primary + Quark already holds S01E01-E04)", async () => {
-    const simTianyi = new Storage115Simulator({ packs: {} });
+  it("discovers pre-existing season files on a secondary drive when primaryStorageId has none (issue #359: 115 primary + Quark already holds S01E01-E04)", async () => {
+    const simPrimary115 = new Storage115Simulator({ packs: {} });
     const simQuark = new Storage115Simulator({
       packs: {
         preseed: {
@@ -393,7 +385,7 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
     });
     await simQuark.transferCandidate({ candidateId: "preseed", intoDirectoryId: quarkSeasonDir });
 
-    const driveTianyi = makeDrive({ storageId: "cs_tianyi", provider: "tianyi", label: "天翼云盘", sim: simTianyi });
+    const drivePrimary115 = makeDrive({ storageId: "cs_115_primary", provider: "pan115", label: "115 网盘", sim: simPrimary115 });
     const driveQuark = makeDrive({ storageId: "cs_quark", provider: "quark", label: "夸克网盘", sim: simQuark });
     // Wire listChildDirectories on Quark so findExistingSeasonDirReadOnly can see the pre-existing folders
     driveQuark.storage.listChildDirectories = async (parentId) => {
@@ -403,8 +395,8 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
     };
 
     const coordinator = new MultiDriveStorageV2({
-      drives: [driveTianyi, driveQuark],
-      primaryStorageId: "cs_tianyi",
+      drives: [drivePrimary115, driveQuark],
+      primaryStorageId: "cs_115_primary",
       target: {
         kind: "tv",
         categoryKey: "tv",
@@ -414,7 +406,7 @@ describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routin
         seasons: [1],
         workflowRunId: "run_731",
       },
-      buildDriveAdapter: (d) => (d.storageId === "cs_tianyi" ? simTianyi : simQuark),
+      buildDriveAdapter: (d) => (d.storageId === "cs_115_primary" ? simPrimary115 : simQuark),
       resolveCandidate: () => undefined,
     });
 

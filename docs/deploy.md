@@ -1,21 +1,15 @@
 # Deploy Mediary Scout
 
-Mediary Scout 有两种部署方式:
+Mediary Scout 以 Docker Compose 部署（NAS / 软路由 / VPS / 闲置 PC）：
 
-| | 桌面版(macOS / Windows) | Docker Compose (服务器) |
-|---|---|---|
-| 适合 | 自己用,不想折腾 Docker | NAS / 软路由 / VPS / 闲置 PC |
-| 数据层 | SQLite(本地文件) | Postgres |
-| 部署 | 下载 DMG / EXE 安装 | `docker compose up -d` |
-| 下载 | [GitHub Releases](https://github.com/fancydirty/mediary-scout/releases) | 本指南下方 |
+| | Docker Compose |
+|---|---|
+| 适合 | NAS / 软路由 / VPS / 闲置 PC |
+| 数据层 | Postgres |
+| 部署 | `docker compose up -d` |
+| 升级 | `./scripts/deploy.sh` |
 
-**桌面版**:去 [Releases](https://github.com/fancydirty/mediary-scout/releases) 下载 `.dmg` 或 `.exe`,打开安装,启动后在设置里配网盘和 AI 模型即可,有新版本时应用会提示你下载。详见 [README → 安装](../README.md#安装)。
-
-**Docker 版**:继续往下看。
-
----
-
-> **English summary.** Self-host with one command — `docker compose up -d` brings up web (Next.js + in-process worker) + Postgres + a bundled PanSou. Open `http://<host>:3000`, go to Settings, scan-login your drive (115 / Quark / 123 / Tianyi by QR; GuangYaPan by pasted token), add an OpenAI-compatible LLM endpoint, and you're running. It is intended for local / LAN use — **never expose `:3000` raw to the internet**. Full walkthrough below (Chinese).
+> **English summary.** Self-host with one command — `docker compose up -d` brings up web (Next.js + in-process worker) + Postgres + a bundled PanSou. Open `http://<host>:3000`, go to Settings, scan-login your drive (115 / Quark by QR), add an OpenAI-compatible LLM endpoint, and you're running. It is intended for local / LAN use — **never expose `:3000` raw to the internet**. Full walkthrough below (Chinese).
 
 一行命令起整套:**web(Next + 进程内 worker)+ Postgres + 自带 PanSou**。本指南覆盖:选宿主 → compose 起服务 → 从自己的设备访问 → 安全/升级。
 
@@ -23,9 +17,6 @@ Mediary Scout 有两种部署方式:
 - [让 AI agent 帮你部署](#让-ai-agent-帮你部署)
 - [选择你的宿主](#选择你的宿主)
 - [Compose 快速开始](#compose-快速开始)
-- [光鸭云盘(GuangYaPan)连接](#光鸭云盘guangyapan连接)
-- [天翼云盘连接](#天翼云盘连接)
-- [123网盘连接](#123网盘连接)
 - [想跑真实获取还需要](#想跑真实获取还需要)
 - [可选增强](#可选增强)
 - [访问方式](#访问方式)
@@ -47,13 +38,15 @@ Mediary Scout 有两种部署方式:
 2. **单账号还是多账号?** 默认单账号(就你自己用)。多账号让家人/朋友各注册、各绑自己的网盘、各看各的库。
 
 ## 建议问(有默认,但确认偏好)
-3. **现在就配真实获取,还是先起来看看?** 真实获取需要一块支持的网盘(夸克 / UC / 115 / 光鸭 / 123 / 天翼)+ 一个 OpenAI 兼容的 AI 模型接口。先不配也能起来看界面,之后在设置页配。
+3. **现在就配真实获取,还是先起来看看?** 真实获取需要一块支持的网盘(115 / 夸克)+ 一个 OpenAI 兼容的 AI 模型接口。先不配也能起来看界面,之后在设置页配。
 
 ## 可选——一句话问,都不需要就跳过
 4. 这些可选项有想现在配的吗?都不需要就回「跳过」:
    - 通知推送(Bark / Server酱 / 企业微信 / webhook)
    - 自己的 TMDB key(不配默认走作者代理,开箱即用)
-   - Prowlarr 磁力聚合(115 / 光鸭 / 123 可用)
+   - Prowlarr 磁力聚合(仅 115 支持磁力)
+   - Emby 联动(已有集跳过搜索)
+   - SmartStrm 自动化 Webhook(落盘后生成 .strm)
    - 国内构建加速(registry mirror + npm 镜像)
 
 ## 然后执行
@@ -62,7 +55,7 @@ Mediary Scout 有两种部署方式:
 - `docker compose up -d`(首次构建要几分钟)
 - 多账号:在 `.env` 加 `MEDIA_TRACK_MULTI_USER=1`,再 `docker compose up -d web`
 - 打开 `http://<主机>:3000`,带用户走设置页(网盘 / AI 模型 / 可选项)
-- 确认跑起来,报出网址,并告诉用户:以后在「设置 → 更新」里一键更新(也可以打开每天自动更新);命令行升级用 `./scripts/deploy.sh`
+- 确认跑起来,报出网址,并告诉用户:以后升级在部署目录运行 `./scripts/deploy.sh`
 ````
 
 ## 选择你的宿主
@@ -124,7 +117,7 @@ docker compose up -d        # 首次会构建 web 镜像,几分钟
 > 效果一样。`DOCKER_MIRROR` 的好处是只影响本项目、不需要 root、不用重启 daemon。
 
 打开 `http://<你的主机>:3000`:
-1. **设置 → 网盘**:在品牌瓦片里选一个开始连接——115 / 夸克 / 天翼 / 123 扫码登录,夸克与 UC 也可粘贴 cookie,光鸭粘贴 token(见各品牌连接小节);凭证入库后自动用于转存。五个品牌可各绑一块盘,互为独立工作区。
+1. **设置 → 网盘**:在品牌瓦片里选 115 或夸克开始连接,扫码登录（夸克也可粘贴 cookie）;凭证入库后自动用于转存。两块盘可同时绑定,互为独立工作区。
 2. 就这样。**TMDB 元数据经作者 CF Worker 开箱即用**(想用自己额度可在设置填 TMDB key);**PanSou 网盘搜索源已自带**。
 
 ### 组成 / 端口
@@ -139,73 +132,14 @@ docker compose up -d        # 首次会构建 web 镜像,几分钟
 
 `docker-compose.yml` 的 `environment:` 已设好库连接、PanSou 地址、adapters。要覆盖额外项(TMDB / 115 cookie / LLM / Prowlarr / CID),在仓库根放 `.env`(参照 `.env.example`)——compose 会自动加载(缺失也无妨)。
 
-## 光鸭云盘(GuangYaPan)连接
+## 网盘目录布局
 
-光鸭云盘(迅雷旗下,2026 年上线)和 115、123 一样走两条路:
-
-- **光鸭分享链**(`guangyapan.com/s/…`):PanSou 搜到的光鸭分享,服务端直接转存进你的盘,文件夹整个转,几秒就完成。
-- **磁力 / ed2k / BT**:PanSou(magnet 类型)和可选 Prowlarr 找到的磁力,经光鸭的离线下载拉进盘里。
-
-> ⚠️ PanSou 上的光鸭分享有不少打得开却列不出文件(可能是分享者设了限制,或内容在审核),这种会明确报 `GUANGYA_SHARE_EMPTY`,agent 会换下一个候选。别的网盘(115 / 夸克 / UC / 123 / 天翼)的分享链落不到光鸭,会报 `GUANGYA_UNSUPPORTED_LINK`。想要磁力覆盖更全,可以再配 **Prowlarr**。
->
-> 和所有获取一样,光鸭也需要先配好 **AI 模型(LLM)**,见下文「[想跑真实获取还需要](#想跑真实获取还需要)」。
-
-光鸭用 **`access_token` + `refresh_token`** 鉴权(不是 cookie、不是扫码)。`access_token` 约 2 小时过期,`refresh_token` 会在过期时自动续期,续期后的新 token 自动写回该盘,无需你手动重粘。
-
-### 1. 在设置页粘 token
-
-**设置 → 网盘连接 → 选「光鸭云盘」标签页**。最省事:把下面 Console 打印出来的内容(打印的两段、或它复制到剪贴板的 JSON,都行)整段粘到**第一个框**,再点框下方的 **「识别并拆分 token」**,两个框会自动填好;确认无误后点「连接光鸭」。(也可以仍按老办法手动把两个值分别粘进两个框。)连接时会用 token 校验登录态、并在你盘里建好 `Mediary Scout/{Movies,TV,Anime}` 分类目录。
-
-### 2. 怎么拿到这两个 token
-
-1. 用浏览器登录光鸭云盘网页版:**[https://www.guangyapan.com](https://www.guangyapan.com)**(或 app.guangyapan.com),确保已登录。
-2. 按 **F12** 打开 DevTools → 切到 **Console(控制台)** 标签。
-3. 粘贴并运行下面这段(它从 `localStorage` 里读出登录态。光鸭把凭证存在键 `credentials_<clientid>`,当前 clientid 是 `aMe-8VSlkrbQXpUR`,即键名 `credentials_aMe-8VSlkrbQXpUR`):
-
-   ```js
-   (() => {
-     const clientId = "aMe-8VSlkrbQXpUR"; // 光鸭 web app 的 client_id
-     const raw = localStorage.getItem(`credentials_${clientId}`);
-     if (!raw) { console.warn("没找到 credentials_* —— 请确认已登录光鸭网页版后重试"); return; }
-     const c = JSON.parse(raw);
-     const out = { accessToken: c.access_token, refreshToken: c.refresh_token };
-     console.log("accessToken:\n" + out.accessToken);
-     console.log("\nrefreshToken:\n" + out.refreshToken);
-     try { copy(JSON.stringify(out, null, 2)); console.log("\n(已复制到剪贴板)"); } catch {}
-     return out;
-   })();
-   ```
-
-   > 如果 `credentials_aMe-8VSlkrbQXpUR` 取不到(光鸭后续改了 clientid),在 Console 里跑 `Object.keys(localStorage).filter(k => k.startsWith("credentials_"))` 看实际键名,把后缀换进上面的 `clientId`。
-
-4. 控制台会打印 `accessToken` 与 `refreshToken`(且尝试把 `{accessToken, refreshToken}` JSON 复制到剪贴板)。把打印的两段、或复制的 JSON,整段粘到设置页**第一个框**,点 **「识别并拆分 token」**即可自动填好两个框(不必手动分辨哪段是哪个)。
-
-> 🔒 **别把 token 贴到任何公开地方**(issue、聊天群、截图、粘贴板网站)。它们等同你光鸭账号的登录态;只该出现在你自己实例的设置页里。
-
-### 3. 来源致谢(API 逆向)
-
-光鸭云盘的网盘 API 集成,基于开源项目 **[AList](https://github.com/AlistGo/alist)** 的 `guangyapan` driver(目录 [`drivers/guangyapan`](https://github.com/AlistGo/alist/tree/main/drivers/guangyapan))。该 driver 是本项目逆向光鸭 API 的来源,在此致谢。
-
-## 天翼云盘连接
-
-天翼云盘(中国电信)是第四个支持的品牌,走**转存分享**路径(`cloud.189.cn/t/…` 分享链,与夸克同模型;无磁力/离线 API,Prowlarr 不适用)。
-
-- **连接**:设置 → 网盘 → 选「天翼云盘」→ 用天翼云盘 App 扫码。扫码不便时点开「手动粘 SSON cookie」:浏览器登录 [cloud.189.cn](https://cloud.189.cn) 后,从开发者工具 → Application → Cookies 里复制 `SSON` 的值粘入。
-- 会话由系统自动续期;显示「掉线」时重新扫码绑定同一账号即可恢复,追踪数据不丢。
-- 资源量提示:PanSou 上天翼分享目前偏少(电影尤其弱,剧/动漫可用),见[各盘资源量对比](drive-brand-evaluations.md#已支持五盘的资源量2026-07-抽样)。
-
-## 123网盘连接
-
-123网盘是第五个支持的品牌,和 115 一样两条路:**转存分享**(`123pan.com/s/…` 分享链;免费账号即可转存——转存是服务端秒传复制,不消耗提取流量)和**磁力**(走 123 自己的离线下载)。
-
-- **连接**:设置 → 网盘 → 选「123网盘」→ 用 123网盘 App 扫码(登录约 **90 天**有效)。扫码不便时点开「手动粘 token」:浏览器登录 [123pan.com](https://www.123pan.com) 网页版后,开发者工具 → Application → Local Storage 里找 `eyJ…` 开头的登录 token 整段粘入。
-- token 到期后显示「掉线」,重新扫码即恢复。
-- 磁力候选来自 PanSou 和 Prowlarr(配了的话);免费账号的离线下载额度很少,主要还是靠分享链。
+连接网盘时会在盘里建好 `影视/{电影,电视剧,综艺,动漫}` 四个分类目录。每个盘都能在 **设置 → 网盘 → 媒体库目录** 里自定义根目录名、四个分类名，以及它在 SmartStrm 里的挂载前缀（如 `/115`）；已入库的旧剧集不会被移动。
 
 ## 想跑真实获取还需要
 
 - **AI 模型**(设置 → AI 模型):填一个 OpenAI 兼容的 `baseURL / apiKey / modelId`——agent 靠它决策。不填则获取流程无法规划。
-- **网盘**(设置 → 网盘):扫码或粘凭证绑定。绑定时会在盘里自动建好 `Mediary Scout/{Movies,TV,Anime}` 三个落盘目录,不用手填目录 ID。
+- **网盘**(设置 → 网盘):扫码或粘凭证绑定。绑定时会在盘里自动建好 `影视/{电影,电视剧,综艺,动漫}` 四个落盘目录,不用手填目录 ID;目录名可在「媒体库目录」里改。
 
 ## 可选增强
 
@@ -213,7 +147,7 @@ docker compose up -d        # 首次会构建 web 镜像,几分钟
 - **出站代理**(`.env` 设 `HTTP_PROXY` / `HTTPS_PROXY`):墙内想用**自己的 TMDB token / 额度**时用得到。TMDB 的 API 主机(`api.themoviedb.org`)在国内常被单独墙(官网能开 ≠ API 能通),直连不到你的 token 就用不上。给容器配一个能穿透的代理即可让全部出站请求(TMDB / PanSou / Prowlarr)走它:在仓库根 `.env` 里写 `HTTP_PROXY=http://172.17.0.1:7890` 和 `HTTPS_PROXY=http://172.17.0.1:7890`(`172.17.0.1` 是 Docker 默认网关,指向宿主机;端口换成你宿主上代理软件的实际端口,如 Clash 的 7890),再 `docker compose up -d`。`NO_PROXY` 可排除内网地址。**不设代理时行为不变**——TMDB token 留空走作者内置代理依旧开箱即用,这条只为「墙内 + 想用自己 token」准备。
   - **内置代理也连不上时同样用此法**(#83 实例,现已缓解):内置 TMDB 代理曾托管在 `*.workers.dev` 域名下,该域名在部分国内网络/运营商下会被整域阻断——症状是搜索报 `All N TMDB access(es) failed: TimeoutError`(N 为通道数,未配 token 时为 1)。**现默认代理已换自定义域名 `tmdb-proxy.mediaryscout.app`,绝大多数国内网络可直连**;若你的网络连它也阻断,再按上面配 `HTTP_PROXY` / `HTTPS_PROXY` 让容器出站走代理。
   - **WSL2 部署注意**(#83 踩坑实录):容器内的 `127.0.0.1` 指容器自身,填 Windows 宿主上的代理要用 WSL2 虚拟网卡的宿主 IP;且 Windows 防火墙常拦截来自 WSL2 虚拟网卡的入站连接(即使代理软件开了「允许局域网连接」),需要放行防火墙或在 WSL2 内起一层转发(监听 0.0.0.0 转发到 127.0.0.1:代理端口),容器再指向 WSL2 自身 IP。
-- **Prowlarr**(设置 → 资源提供商):接入索引器聚合,磁力与 PanSou 结果合并,走 115 / 光鸭 / 123 的离线下载落盘(夸克、UC 和天翼没有可用的磁力接口)。
+- **Prowlarr**(设置 → 资源提供商):接入索引器聚合,磁力与 PanSou 结果合并,走 115 的离线下载落盘(夸克没有可用的磁力接口)。
 - **换 PanSou 实例**(设置 → 资源提供商):默认用 compose 自带的;想指向别的实例/公共域名在此手填。
 
 ## 访问方式
@@ -303,33 +237,13 @@ docker compose build --build-arg NPM_REGISTRY=https://registry.npmmirror.com
 >
 > 手动等价执行 + 校验:
 > ```bash
-> # 一键更新后部署目录停在发布标签上,pull 需要一个分支(deploy.sh 自己也会先做这一步):
+> # 如果部署目录停在某个发布标签上,pull 需要一个分支(deploy.sh 自己也会先做这一步):
 > git checkout main
 > git pull --ff-only
 > GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build
 > # 核对容器真在跑新代码(应等于上面的 HEAD):
 > docker compose exec web cat BUILD_COMMIT
 > ```
-
-### 在网页里一键更新
-
-设置 → 更新会列出新的发布版本，自托管实例上有「立即更新」。
-
-新装的实例直接就有。从还没有更新助手的旧版本升级上来的，要先手动升级一次，更新助手容器才会起来。在部署目录运行：
-
-```bash
-./scripts/deploy.sh
-```
-
-一次更新会等正在跑的任务结束，把数据库备份到 `backups/pre-update-*.sql.gz`（只留最近 5 份），然后构建新版本——这段时间旧版本继续服务。构建好了先暂停开始新任务（已经排队的会留到新版本再跑），等正在跑的任务结束再替换，网页大约有一分钟打不开。接着检查新版本，没通过就自动回到旧版本；更新助手中途被重启，也会在重新启动后自动回到旧版本。
-
-它不会覆盖你改过的已跟踪文件。配置写在 `.env`。
-
-设置 → 更新里还有「每天自动更新」，默认关。打开后选一个整点（北京时间），到点若有新发布版本就自动更新一次；有获取任务在进行时会等它结束，和手动点「立即更新」一样。同一个发布版本连续两次没更新成功，就不再自动重试，直到你手动点一次「立即更新」。
-
-从 GitHub 下载新版本时，设了 `.env` 里的 `HTTPS_PROXY` / `HTTP_PROXY` 就走它——和应用其余出站请求（TMDB / PanSou 等）同一个代理；没设就直连。改了 `.env` 要在部署目录运行 `docker compose up -d` 才会生效。
-
-只有更新助手容器挂 Docker socket。它不映射任何端口，只接受「更新到这个发布标签」，令牌只有 web 容器能读。更新助手不会更新自己：一键更新只替换 web 容器。某个版本如果改了 `updater/`，发布说明会写明，那时在部署目录运行 `docker compose up -d --build updater`；运行 `./scripts/deploy.sh` 时它也会一并重建。
 
 ## 备份与恢复（pgdata）
 

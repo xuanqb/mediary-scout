@@ -40,6 +40,7 @@ export interface AcquisitionDriveContext {
     tv: string;
     anime: string;
     movies: string;
+    variety: string;
   };
   /** Cached or freshly-probed drive capacity at run start. Null when unknown. */
   space: DriveSpaceInfo | null;
