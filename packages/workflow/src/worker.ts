@@ -706,12 +706,16 @@ export async function runScheduledType3Monitoring(input: {
    *  to keep those shows off the same drive as its bound ones when running in
    *  parallel; null when the account has no drive. */
   resolveDriveId?: (accountId: string) => Promise<string | null>;
-  /** Checked before each show's run is reserved; a false stops the rest of the sweep
-   *  from starting (those shows are reported skipped_active). */
+  /** Manual per-season retry: patrol ONLY these tracked-season ids. Absent = the
+   *  normal full sweep. Season ids are globally unique, so this also scopes the
+   *  run to its owning account/drive via the state's own account context. */
+  onlyTrackedSeasonIds?: ReadonlySet<string>;
 }): Promise<ScheduledType3Outcome[]> {
   const now = input.now ?? (() => new Date().toISOString());
   // Cross-account: patrol EVERY user's tracked shows, each under its owner's creds.
-  const trackedStates = await input.repository.listAllTrackedSeasonStates();
+  const trackedStates = (await input.repository.listAllTrackedSeasonStates()).filter(
+    (state) => input.onlyTrackedSeasonIds === undefined || input.onlyTrackedSeasonIds.has(state.season.id),
+  );
 
   // Works with a user message or an unfinished replacement run as ONE replace_request
   // (it covers every season and includes the gaps), so this sweep skips their seasons.

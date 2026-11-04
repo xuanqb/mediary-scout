@@ -15,6 +15,7 @@ import { SwapBadgeLive, SwapEpisodeCell, SwapKeepProvider } from "../../../compo
 import {
   RequestRemainingButton,
   RequestSeasonButton,
+  RetrySeasonButton,
 } from "../../../components/title-action-buttons";
 import { UntrackButton } from "../../../components/untrack-button";
 import { LibraryCategorySelect } from "../../../components/library-category-select";
@@ -525,6 +526,16 @@ function SeasonRow({
       <span className="season-cell-obtained">
         {season.tracked ? `${season.obtainedCount}/${aired}/${total}` : "—"}
       </span>
+      {/* 重试只对「仍在更新」的已追踪季有意义：它跑的就是每日巡检那套补缺流程。
+          已完结的季由 bridge 重算后必然已补齐，不给重试入口。 */}
+      {season.tracked && season.status === "active" ? (
+        <RetrySeasonButton
+          tmdbId={tmdbId}
+          seasonNumber={season.seasonNumber}
+          storageId={storageId}
+          titleAcquiring={acquiring}
+        />
+      ) : null}
     </>
   );
 

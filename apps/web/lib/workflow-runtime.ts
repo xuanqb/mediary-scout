@@ -2249,6 +2249,52 @@ async function runScheduledType3Now(options?: { force?: boolean }): Promise<Sche
 }
 
 /**
+ * 手动「重试本季」：只对这一个 tracked season 跑一次巡检（type3_monitor），
+ * 语义与每日巡检完全相同（TMDB 同步 → 只补缺集 → 落盘 → 通知），但不认领定时
+ * slot、不跑全库 GC/janitor——所以不会把当天的定时巡检标记成已完成。
+ * 同步执行：调用方（server action）要一直等到这季跑完。
+ */
+export async function runSeasonPatrolNow(input: {
+  trackedSeasonId: string;
+  /** 该季所属账户（活动页/详情页当前 workspace）。base deps 的兜底账户。 */
+  accountId: string;
+}): Promise<Awaited<ReturnType<typeof runScheduledType3Monitoring>>[number] | null> {
+  const repository = getWorkflowRepository();
+  const startedAt = new Date().toISOString();
+  await hydratePan115CookieFromDb();
+  const sync = tmdbSeasonMetadataSync();
+  const { model, llmConfig, preferredLanguage, qualityPreference } = await getAgentModel(
+    getAccountScopedSettings(input.accountId),
+  );
+  const parents = await getWorkerStorageParents(input.accountId);
+  const outcomes = await runScheduledType3Monitoring({
+    repository,
+    resourceProvider: await getWorkerResourceProvider(),
+    storage: await getWorkerStorageExecutor(input.accountId),
+    model,
+    llmConfig,
+    ...(preferredLanguage === undefined ? {} : { preferredLanguage }),
+    ...(qualityPreference === undefined ? {} : { qualityPreference }),
+    storageParentDirectoryId: parents.tv,
+    animeStorageParentDirectoryId: parents.anime,
+    varietyStorageParentDirectoryId: parents.variety,
+    moviesParentDirectoryId: parents.movies,
+    staleActiveRunTimeoutMs: 30 * 60 * 1000,
+    maxConcurrentRuns: 1,
+    resolveDriveId: defaultDriveIdOf,
+    resolveAccountContext: buildAccountContextResolver(),
+    onAuthErrorFreeze: (id, reason) => freezeConnectedStorage(id, reason),
+    ...(sync ? { syncSeasonMetadata: sync } : {}),
+    onlyTrackedSeasonIds: new Set([input.trackedSeasonId]),
+  });
+  const outcome = outcomes.find((entry) => entry.trackedSeasonId === input.trackedSeasonId) ?? null;
+  if (outcome?.status === "ran") {
+    await pushNotificationsSince(repository, startedAt, { workflowRunId: outcome.workflowRunId });
+  }
+  return outcome;
+}
+
+/**
  * The Type 3 sweep's TMDB re-sync (the GUI's `sync_all`): refresh each tracked
  * season's aired/total from TMDB so the sweep discovers episodes that aired
  * after tracking began. Returns undefined when TMDB isn't configured, leaving

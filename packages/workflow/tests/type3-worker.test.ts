@@ -167,6 +167,32 @@ describe("runScheduledType3Monitoring (V2 engine)", () => {
     expect(outcomes).toEqual([]);
   });
 
+  it("patrols ONLY the requested tracked-season id (manual per-season retry)", async () => {
+    const repository = new InMemoryWorkflowRepository();
+    const first = trackedFixture("first");
+    const retried = trackedFixture("retried");
+    const storage = new FakeStorageExecutor();
+    for (const fixture of [first, retried]) {
+      await seedTrackedSeason({ repository, ...fixture, obtainedCodes: ["S01E01", "S01E02"] });
+      await seedV2Season(storage, fixture.title, fixture.season, ["S01E01", "S01E02"]);
+    }
+    let run = 0;
+
+    const outcomes = await runScheduledType3Monitoring({
+      repository,
+      resourceProvider: emptyProvider(),
+      storage,
+      model: throwingModel(),
+      storageParentDirectoryId: "library_root",
+      now: fixedNow,
+      createWorkflowRunId: () => `run_${++run}`,
+      onlyTrackedSeasonIds: new Set([retried.season.id]),
+    });
+
+    expect(outcomes).toHaveLength(1);
+    expect(outcomes[0]).toMatchObject({ trackedSeasonId: retried.season.id, status: "ran" });
+  });
+
   it("detects a real gap, runs the agent over the sandbox, and persists a type3_monitor run", async () => {
     const repository = new InMemoryWorkflowRepository();
     const { title, season } = trackedFixture();
