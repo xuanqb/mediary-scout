@@ -75,6 +75,8 @@ export interface RunAcquisitionV2WorkflowRequest {
   /** Optional Jev candidate prefilter (see orchestrator.jevJudge). */
   jevJudge?: JevJudge;
   deadLinkStore?: DeadLinkStore;
+  /** See orchestrator.resolveCandidateLink (Tgto: lazy copy-link at transfer time). */
+  resolveCandidateLink?: RunAcquisitionV2Request["resolveCandidateLink"];
   /** Agent memory (see orchestrator.memory). */
   memory?: { store: AgentMemoryStore; accountId: string; drive?: string };
   /** A replace_request run (see orchestrator.userRequest). Its episodes join the
@@ -235,6 +237,7 @@ export async function runAcquisitionV2Workflow(
     ...(request.assrtToken === undefined ? {} : { assrtToken: request.assrtToken }),
     ...(request.jevJudge === undefined ? {} : { jevJudge: request.jevJudge }),
     ...(request.deadLinkStore ? { deadLinkStore: request.deadLinkStore } : {}),
+    ...(request.resolveCandidateLink ? { resolveCandidateLink: request.resolveCandidateLink } : {}),
     ...(request.memory ? { memory: request.memory } : {}),
     ...(request.userRequest ? { userRequest: request.userRequest } : {}),
     ...(request.stagingRecovery

@@ -1,6 +1,6 @@
 // packages/workflow/src/jev-prefilter-provider.ts
 import type { ResourceCandidate, ResourceSnapshot, SnapshotPrefilter } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceProvider, ResourceSearchInput } from "./ports.js";
 import { JEV_MODEL, JEV_THRESHOLDS, classifyJevScore, isNsfwDrop, normalizedTargetNames, titleContainsAny, type JevJudge, type JevJudgeTarget } from "./jev-judge.js";
 
 export interface JevPrefilterProviderOptions {
@@ -73,7 +73,7 @@ export class JevPrefilterProvider implements ResourceProvider {
     this.maxConsecutiveFailures = options.maxConsecutiveFailures ?? JEV_CIRCUIT_BREAKER_FAILURES;
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     let snapshot: ResourceSnapshot;
     try {
       snapshot = await this.inner.search(input);

@@ -1,14 +1,14 @@
 import { memoryTitleKey, type AgentMemory, type AgentMemoryStore } from "../agent-memory.js";
 import { buildReflectionDigest, runMemoryReflection } from "./agent-loop.js";
 import type { LanguageModel } from "ai";
-import type { AgentDecision, AuditEvent, LibraryCategory, ResourceSnapshot, TransferAttempt } from "../domain.js";
-import type { AcquisitionDriveContext, ResourceProvider, StorageExecutor } from "../ports.js";
+import type { AgentDecision, AuditEvent, LibraryCategory, ResourceCandidate, ResourceSnapshot, TransferAttempt } from "../domain.js";
+import type { AcquisitionDriveContext, ResourceCandidateLinkResolver, ResourceProvider, ResourceSearchContext, StorageExecutor } from "../ports.js";
 import type { AcquisitionAgentResult } from "./agent-loop.js";
 import type { AgentToolEvent } from "./activity.js";
 import { CandidateRegistry } from "./candidate-registry.js";
 import type { DeadLinkStore } from "./dead-links.js";
 import { linkHistoryByKey } from "./link-history.js";
-import { resourceLinkKey } from "./resource-link.js";
+import { resourceLinkKey, storageProviderForResourceType } from "./resource-link.js";
 import { resourceFingerprintMatches, type LinkHistoryRow } from "../user-requests.js";
 import type { UserRequestPromptInput } from "./user-request-block.js";
 import { RealResourceProviderV2 } from "./real-provider-adapter.js";
@@ -95,6 +95,10 @@ export interface RunAcquisitionV2Request {
   /** Filters known-dead candidates from search results before the agent sees them,
    *  and records newly-proven-dead links from failed transfers (#15). */
   deadLinkStore?: DeadLinkStore;
+  /** Resolves a candidate that carries no url yet (Tgto shares: search returns only
+   *  slug/source; copy-link is the paid call) right before it is transferred. Called
+   *  once per candidate id; the resolved payload is written back to the registry. */
+  resolveCandidateLink?: (candidate: ResourceCandidate) => Promise<ResourceCandidate>;
   /** assrt token (Settings → 字幕来源). When set AND origin is non-CN AND the
    *  drive is 115, the orchestrator pre-warms a subtitle snapshot and the agent
    *  gets viewSubtitleSnapshot/transferSubtitle tools. Undefined/empty = no
@@ -293,8 +297,20 @@ export async function runAcquisitionV2(request: RunAcquisitionV2Request): Promis
     // called only once the agent searches).
     ...(rejectedSource ? { rejectedResources: { list: () => listRejected(), ...(strictRejected ? { strict: true } : {}) } } : {}),
     ...(linkNotes.size > 0 ? { linkHistory: linkNotes } : {}),
+    searchContext: searchContextOfTarget(request.target),
   });
-  const storage = createStorageAdapter(request, registry);
+  const storage = createStorageAdapter(
+    {
+      ...request,
+      ...(request.resolveCandidateLink
+        ? {}
+        : (() => {
+            const fromProvider = linkResolverOf(request.provider);
+            return fromProvider ? { resolveCandidateLink: fromProvider } : {};
+          })()),
+    },
+    registry,
+  );
   const usingMultiDrive = storage instanceof MultiDriveStorageV2;
   let effectiveStagingId = request.stagingDirectoryId;
   let effectiveSeasonDirs = request.targetSeasonDirectoryIds;
@@ -834,6 +850,7 @@ function createStorageAdapter(
           registry,
           workflowRunId: request.workflowRunId,
           ...(request.deadLinkStore ? { deadLinkStore: request.deadLinkStore } : {}),
+          ...(request.resolveCandidateLink ? { resolveCandidateLink: request.resolveCandidateLink } : {}),
         }),
       resolveCandidate: (candidateId) => {
         const c = registry.get(candidateId);
@@ -842,7 +859,13 @@ function createStorageAdapter(
         const rawSize = c.providerPayload?.["sizeBytes"];
         const sizeBytes =
           typeof rawSize === "number" && Number.isFinite(rawSize) && rawSize > 0 ? rawSize : undefined;
-        return { url, ...(sizeBytes === undefined ? {} : { sizeBytes }) };
+        // A lazy-link candidate has no url yet; its declared target brand still has
+        // to pick the right drive, or a 115-only Tgto candidate could be routed to
+        // a 夸克 primary and fail after resolution.
+        const hint = c.providerPayload?.["targetProvider"];
+        const provider =
+          typeof hint === "string" ? (storageProviderForResourceType(hint) ?? undefined) : undefined;
+        return { url, ...(sizeBytes === undefined ? {} : { sizeBytes }), ...(provider === undefined ? {} : { provider }) };
       },
     });
   }
@@ -851,6 +874,7 @@ function createStorageAdapter(
     registry,
     workflowRunId: request.workflowRunId,
     ...(request.deadLinkStore ? { deadLinkStore: request.deadLinkStore } : {}),
+    ...(request.resolveCandidateLink ? { resolveCandidateLink: request.resolveCandidateLink } : {}),
   });
 }
 
@@ -925,6 +949,32 @@ function jevTargetOf(target: AcquisitionV2Target): JevJudgeTarget {
       throw new Error(`unknown target kind: ${String((never as { kind?: unknown }).kind)}`);
     }
   }
+}
+
+/** Structured title identity for providers whose own API takes more than a keyword.
+ *  Same year guard as the judge: 0/NaN must not reach a provider as a real year. */
+function searchContextOfTarget(target: AcquisitionV2Target): ResourceSearchContext {
+  const y = target.year;
+  const year = typeof y === "number" && Number.isFinite(y) && y > 0 ? y : undefined;
+  return {
+    title: target.title,
+    aliases: target.aliases,
+    ...(target.tmdbId ? { tmdbId: target.tmdbId } : {}),
+    ...(year === undefined ? {} : { year }),
+    mediaType: target.kind === "movie" ? "movie" : "tv",
+    ...(target.kind === "tv" ? { seasons: target.seasons } : {}),
+  };
+}
+
+/** Providers may own their lazy-link resolver (Tgto) — the orchestrator picks it
+ *  up without every runner/app call site having to know about it. */
+function linkResolverOf(
+  provider: ResourceProvider,
+): ((candidate: ResourceCandidate) => Promise<ResourceCandidate>) | undefined {
+  const resolver = provider as Partial<ResourceCandidateLinkResolver>;
+  return typeof resolver.resolveCandidateLink === "function"
+    ? resolver.resolveCandidateLink.bind(resolver)
+    : undefined;
 }
 
 /** This work's link notes, or an empty map. A failing read never fails the run. */

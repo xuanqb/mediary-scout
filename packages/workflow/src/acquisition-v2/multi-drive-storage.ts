@@ -2,6 +2,7 @@ import type { LibraryCategory, TransferAttempt } from "../domain.js";
 import { ensureMediaLibraryDirectory, findExistingMediaLibraryDirectory } from "../media-library-folder.js";
 import { formatByteSize, formatDriveSpaceSummary } from "../domain.js";
 import type { AcquisitionDriveContext, StorageExecutor } from "../ports.js";
+import type { StorageProvider } from "../storage-brands.js";
 import { brandOfUrl, candidateDriveLabel, storageProviderForResourceType } from "./resource-link.js";
 import type {
   SimTreeFile,
@@ -44,6 +45,9 @@ export interface MultiDriveTargetSpec {
 export interface MultiDriveCandidateInfo {
   url: string;
   sizeBytes?: number;
+  /** Declared target brand for a candidate whose url is not resolved yet (Tgto
+   *  shares). Used only when `url` yields no brand. */
+  provider?: StorageProvider;
 }
 
 export interface MultiDriveStorageV2Options {
@@ -216,7 +220,9 @@ export class MultiDriveStorageV2 implements StorageV2 {
     const info = this.resolveCandidate(candidateId);
     const url = info?.url ?? "";
     const channel = brandOfUrl(url);
-    const requiredProvider = channel ? storageProviderForResourceType(channel) : null;
+    // A lazy-link candidate (Tgto share) has no url yet — its declared target
+    // brand must still constrain routing, else it can land on the wrong drive.
+    const requiredProvider = channel ? storageProviderForResourceType(channel) : (info?.provider ?? null);
 
     if (explicitStorageId) {
       const explicit = this.states.get(explicitStorageId);

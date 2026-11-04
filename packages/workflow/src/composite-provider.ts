@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ResourceCandidate, ResourceSnapshot } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceCandidateLinkResolver, ResourceProvider, ResourceSearchInput } from "./ports.js";
 import {
   classifySourceFailure,
   mergeSourceHealth,
@@ -15,7 +15,7 @@ export interface CompositeResourceProviderOptions {
 
 const BTIH_RE = /urn:btih:([0-9a-z]+)/i;
 
-export class CompositeResourceProvider implements ResourceProvider {
+export class CompositeResourceProvider implements ResourceProvider, ResourceCandidateLinkResolver {
   private readonly providers: Array<{ name: string; provider: ResourceProvider }>;
   private readonly now: () => string;
 
@@ -24,7 +24,20 @@ export class CompositeResourceProvider implements ResourceProvider {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  /** Delegate lazy-link resolution to whichever member owns the candidate (a
+   *  non-owner returns it unchanged). Without this the wrapper would hide Tgto's
+   *  resolver from the orchestrator and paid shares could never be transferred. */
+  async resolveCandidateLink(candidate: ResourceCandidate): Promise<ResourceCandidate> {
+    for (const entry of this.providers) {
+      const resolver = entry.provider as Partial<ResourceCandidateLinkResolver>;
+      if (typeof resolver.resolveCandidateLink !== "function") continue;
+      const resolved = await resolver.resolveCandidateLink(candidate);
+      if (resolved !== candidate) return resolved;
+    }
+    return candidate;
+  }
+
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     const settled = await Promise.allSettled(
       this.providers.map((entry) => entry.provider.search(input)),
     );

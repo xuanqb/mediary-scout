@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { fetchWithTimeout } from "./fetch-with-timeout.js";
 import type { ResourceCandidate, ResourceSnapshot } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceProvider, ResourceSearchInput } from "./ports.js";
 
 export interface ProwlarrFetchInit {
   method: "GET";
@@ -46,7 +46,7 @@ export class ProwlarrResourceProvider implements ResourceProvider {
     this.now = options.now ?? (() => new Date().toISOString());
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     const url = `${this.baseURL}/api/v1/search?query=${encodeURIComponent(input.keyword)}&type=search`;
     let releases: unknown[] = [];
     try {

@@ -58,6 +58,21 @@ function makeDrive(options: {
 }
 
 describe("MultiDriveStorageV2 — lazy per-drive staging, brand/storageId routing, and hard space gate (C4)", () => {
+  it("routes a url-less candidate by its declared target brand (Tgto lazy shares)", () => {
+    const sim115 = new Storage115Simulator({ packs: {} });
+    const simQuark = new Storage115Simulator({ packs: {} });
+    const drive115 = makeDrive({ storageId: "cs_115", provider: "pan115", label: "115 网盘", sim: sim115 });
+    const driveQuark = makeDrive({ storageId: "cs_quark", provider: "quark", label: "夸克网盘", sim: simQuark });
+    const coordinator = new MultiDriveStorageV2({
+      // Quark is first, so a brand-less candidate would land there by default.
+      drives: [driveQuark, drive115],
+      target: { kind: "tv", categoryKey: "tv", title: "沙丘", year: 2021, tmdbId: 1, seasons: [1], workflowRunId: "run" },
+      buildDriveAdapter: (drive) => (drive.storageId === "cs_115" ? sim115 : simQuark),
+      resolveCandidate: (id) => (id === "lazy" ? { url: "", provider: "pan115" } : undefined),
+    });
+    expect(coordinator.resolveDriveForCandidate("lazy").drive.storageId).toBe("cs_115");
+  });
+
   it("lazily creates staging and season directories only on the drive that actually receives transfers", async () => {
     const sim115 = new Storage115Simulator({
       packs: { c115: { files: [{ path: "Show.S01E01.mkv", sizeBytes: 1000 }] } },

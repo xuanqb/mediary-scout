@@ -6,15 +6,39 @@ import type {
   VerifiedFile,
 } from "./domain.js";
 
+/** Structured title metadata for providers whose own search API takes more than a
+ *  keyword (Tgto: tmdb_id + media_type + season). Keyword-only providers ignore it. */
+export interface ResourceSearchContext {
+  title?: string;
+  aliases?: string[];
+  tmdbId?: number;
+  year?: number;
+  mediaType?: "movie" | "tv";
+  seasons?: number[];
+}
+
+export interface ResourceSearchInput {
+  keyword: string;
+  /** `workflowRunId`, when given, namespaces the returned snapshot/candidate ids
+   *  to that run. Content-hashing providers (PanSou) otherwise yield the SAME id
+   *  for identical results across runs, so a re-acquisition collides on the
+   *  global resource_snapshots primary key and the second run's snapshot is lost
+   *  — the same reason transfer-attempt ids are run-scoped. */
+  workflowRunId?: string;
+  /** Title identity when the run knows it. Optional: ad-hoc searches have none. */
+  context?: ResourceSearchContext;
+}
+
 export interface ResourceProvider {
-  /**
-   * `workflowRunId`, when given, namespaces the returned snapshot/candidate ids
-   * to that run. Content-hashing providers (PanSou) otherwise yield the SAME id
-   * for identical results across runs, so a re-acquisition collides on the
-   * global resource_snapshots primary key and the second run's snapshot is lost
-   * — the same reason transfer-attempt ids are run-scoped.
-   */
-  search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot>;
+  search(input: ResourceSearchInput): Promise<ResourceSnapshot>;
+}
+
+/** A provider whose candidates may lack a url at search time (Tgto shares: the
+ *  real link is a paid copy-link call). The orchestrator resolves such a candidate
+ *  right before transfer. Implementations return the candidate unchanged when it
+ *  is not theirs. */
+export interface ResourceCandidateLinkResolver {
+  resolveCandidateLink(candidate: ResourceCandidate): Promise<ResourceCandidate>;
 }
 
 /** A video file whose name exposes no episode identity — invisible to verification until rescued. */

@@ -23,6 +23,7 @@ import { TmdbApiKeyForm } from "../../components/tmdb-api-key-form";
 import { AssrtTokenForm } from "../../components/assrt-token-form";
 import { ProwlarrConfigForm } from "../../components/prowlarr-config-form";
 import { HaisouConfigForm } from "../../components/haisou-config-form";
+import { TgtoConfigForm } from "../../components/tgto-config-form";
 import { EmbyConfigForm } from "../../components/emby-config-form";
 import { JevPrefilterForm } from "../../components/jev-prefilter-form";
 import { ServiceBlock } from "../../components/service-block";
@@ -34,7 +35,7 @@ import {
   memoryStatsForUi,
   toMemoryItem,
 } from "../../lib/agent-memory-server";
-import { assrtPills, embyPills, haisouPills, isEnvBackedValue, jevPills, llmPills, pansouPills, prowlarrPills, tmdbPills } from "../../lib/service-status";
+import { assrtPills, embyPills, haisouPills, isEnvBackedValue, jevPills, llmPills, pansouPills, prowlarrPills, tgtoPills, tmdbPills } from "../../lib/service-status";
 import { PanSouConfigForm } from "../../components/pansou-config-form";
 import { DailySweepForm } from "../../components/daily-sweep-form";
 import { PatrolConcurrencyForm } from "../../components/patrol-concurrency-form";
@@ -72,6 +73,11 @@ import {
   getProwlarrConfig,
   HAISOU_API_KEY_SETTING_KEY,
   getHaisouApiKey,
+  TGTO_BASE_URL_SETTING_KEY,
+  TGTO_API_TOKEN_SETTING_KEY,
+  TGTO_MAX_POINTS_SETTING_KEY,
+  TGTO_SOURCES_SETTING_KEY,
+  getTgtoConfig,
   resolveAgentModelConfig,
   getJevConfig,
   getJevBaseUrlOverride,
@@ -528,6 +534,16 @@ async function ResourceProviderSection() {
   const prowlarrBaseURL = (await repository.getSetting(PROWLARR_BASE_URL_SETTING_KEY)) ?? "";
   const prowlarrApiKeySet = Boolean((await repository.getSetting(PROWLARR_API_KEY_SETTING_KEY))?.trim());
   const haisouApiKeySet = Boolean((await repository.getSetting(HAISOU_API_KEY_SETTING_KEY))?.trim());
+  const tgtoBaseUrl = (await repository.getSetting(TGTO_BASE_URL_SETTING_KEY)) ?? "";
+  const tgtoTokenSet = Boolean((await repository.getSetting(TGTO_API_TOKEN_SETTING_KEY))?.trim());
+  const tgtoMaxPoints = Number.parseInt((await repository.getSetting(TGTO_MAX_POINTS_SETTING_KEY)) ?? "0", 10) || 0;
+  const tgtoSources = ((await repository.getSetting(TGTO_SOURCES_SETTING_KEY)) ?? "")
+    .split(",")
+    .map((source) => source.trim())
+    .filter((source) => source.length > 0);
+  const tgto = await getTgtoConfig(repository);
+  const tgtoFromEnv =
+    !tgtoBaseUrl.trim() || (!tgtoTokenSet && Boolean(tgto?.token));
   const embyBaseURL = (await repository.getSetting(EMBY_BASE_URL_SETTING_KEY)) ?? "";
   const embyApiKeySet = Boolean((await repository.getSetting(EMBY_API_KEY_SETTING_KEY))?.trim());
   const embyLibraryNames = parseEmbyLibraryNames(
@@ -638,6 +654,39 @@ async function ResourceProviderSection() {
         }
       >
         <HaisouConfigForm apiKeySet={haisouApiKeySet} />
+      </ServiceBlock>
+      <ServiceBlock
+        name="TgtoDrive"
+        pills={tgtoPills({
+          baseUrlSet: Boolean(tgtoBaseUrl.trim()),
+          tokenSet: tgtoTokenSet,
+          fromEnv: tgtoFromEnv,
+          maxPoints: tgtoMaxPoints,
+        })}
+        summary="补充源：RE0 的 115 转存分享 + 观影磁力。分享链只在真正转存时换取，默认不扣积分。"
+        details={
+          <>
+            <p>
+              这是你自建 TgtoDrive 实例的 OpenAPI。它聚合三个资源来源：<b>RE0</b>（115 转存分享，搜索时只有条目信息，链接要在转存那一刻用 <code>copy-link</code> 换取）、<b>观影</b>（磁力，链接直接随搜索结果下发，免费）、<b>SeedHub</b>（磁力，但单次搜索要 30 秒以上）。
+            </p>
+            <p>
+              <b>积分</b>：只有 <code>copy-link</code> 会扣积分，而且解锁是永久的（同一账号之后再取不再扣）。这里默认上限是 <b>0</b>，也就是只使用已解锁/免费资源，绝不会自动扣分；把上限调到 4 才会解锁需要积分的条目（Tgto 自己实例的 <code>max_points</code> 也是 4）。
+            </p>
+            <p>
+              目标网盘只支持 <b>115</b>：上游对夸克目标直接返回 400，123/光鸭需要在 Tgto 里另行配置。所以这个源只会在有 115 盘时挂载。
+            </p>
+            <p>
+              Token 是 Tgto 管理后台的 Bearer Token（形如 <code>tgto__…</code>），权限等同于管理员，只存本机数据库。地址要填容器能访问到的地址（局域网 IP 即可）。
+            </p>
+          </>
+        }
+      >
+        <TgtoConfigForm
+          baseUrl={tgtoBaseUrl}
+          tokenSet={tgtoTokenSet}
+          maxPoints={tgtoMaxPoints}
+          sources={tgtoSources.length > 0 ? tgtoSources : ["re0", "guanying"]}
+        />
       </ServiceBlock>
       {showProwlarr ? (
         <ServiceBlock

@@ -9,6 +9,7 @@ import {
 import { episodeCodeFromFileName } from "./episode-code.js";
 import type {
   ResourceProvider,
+  ResourceSearchInput,
   StorageExecutor,
   UnparsedVideoFile,
 } from "./ports.js";
@@ -44,7 +45,7 @@ export class FakeResourceProvider implements ResourceProvider {
   // NOT scope the id: the fake's per-instance counter is already unique within a
   // test, and stable `snapshot_N` ids keep fixtures readable. Cross-run id
   // scoping is a content-hashing-provider concern, covered by the PanSou tests.
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     const error = this.keywordErrors[input.keyword];
     if (error !== undefined) {
       throw new Error(error);

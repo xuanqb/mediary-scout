@@ -1,4 +1,4 @@
-import type { TransferAttempt } from "../domain.js";
+import type { ResourceCandidate, TransferAttempt } from "../domain.js";
 import type { StorageExecutor } from "../ports.js";
 import { isBrandStorageAuthError } from "../storage-auth-error.js";
 import type { CandidateRegistry } from "./candidate-registry.js";
@@ -8,7 +8,7 @@ import {
   UNRESOLVED_MAGNET_DEAD_LINK_TTL_MS,
   type DeadLinkStore,
 } from "./dead-links.js";
-import { brandOfUrl } from "./resource-link.js";
+import { brandOfUrl, storageProviderForResourceType } from "./resource-link.js";
 import type { SimTreeFile, StorageV2, SubtitleLandingResult, TransferAttemptResult } from "./storage-115-simulator.js";
 
 /**
@@ -35,6 +35,10 @@ export interface RealStorageV2Options {
   /** When set, a transfer PROVEN dead (115 fail-loud / magnet-no-秒传) records the
    *  link so future PanSou searches filter it out before the agent sees it (#15). */
   deadLinkStore?: DeadLinkStore;
+  /** Resolves a candidate that still has no url (Tgto shares) at transfer time.
+   *  The resolved payload is written back into the shared registry, so the agent's
+   *  alias and later transfers see the url too. */
+  resolveCandidateLink?: (candidate: ResourceCandidate) => Promise<ResourceCandidate>;
 }
 
 export class RealStorageV2 implements StorageV2 {
@@ -42,6 +46,7 @@ export class RealStorageV2 implements StorageV2 {
   private readonly registry: CandidateRegistry;
   private readonly workflowRunId: string;
   private readonly deadLinkStore: DeadLinkStore | undefined;
+  private readonly resolveCandidateLink: RealStorageV2Options["resolveCandidateLink"];
   private readonly recordedAttempts: TransferAttempt[] = [];
 
   constructor(options: RealStorageV2Options) {
@@ -49,6 +54,7 @@ export class RealStorageV2 implements StorageV2 {
     this.registry = options.registry;
     this.workflowRunId = options.workflowRunId;
     this.deadLinkStore = options.deadLinkStore;
+    this.resolveCandidateLink = options.resolveCandidateLink;
   }
 
   /** Every transfer attempt this run, for the workflow to persist. */
@@ -64,10 +70,15 @@ export class RealStorageV2 implements StorageV2 {
    *  parser — the same one its executor transfers with — so this classifier can
    *  never drift from what actually transfers (no second domain list). */
   candidateLinkKind(candidateId: string): "share" | "magnet" | "unknown" {
-    const url = String(this.registry.get(candidateId)?.providerPayload?.["url"] ?? "");
+    const candidate = this.registry.get(candidateId);
+    const url = String(candidate?.providerPayload?.["url"] ?? "");
     const brand = brandOfUrl(url);
     if (brand === "magnet") return "magnet";
     if (brand !== null) return "share";
+    // A lazy-link candidate declares the brand its resolver will produce; without
+    // this it would look "unknown" and transferUntilLanded would refuse it.
+    const hint = candidate?.providerPayload?.["targetProvider"];
+    if (typeof hint === "string" && storageProviderForResourceType(hint) !== null) return "share";
     return "unknown";
   }
 
@@ -112,11 +123,20 @@ export class RealStorageV2 implements StorageV2 {
     candidateId: string;
     intoDirectoryId: string;
   }): Promise<TransferAttemptResult> {
-    const candidate = this.registry.get(input.candidateId);
-    if (!candidate) {
+    const registered = this.registry.get(input.candidateId);
+    if (!registered) {
       throw new Error(
         `REAL_STORAGE_CANDIDATE_NOT_REGISTERED: ${input.candidateId} was never observed in a search this run`,
       );
+    }
+    // Paid lazy link (Tgto): resolve BEFORE the executor sees the candidate, and
+    // write it back so the agent alias and a retry never pay/travel twice.
+    const candidate =
+      this.resolveCandidateLink && !String(registered.providerPayload?.["url"] ?? "")
+        ? await this.resolveCandidateLink(registered)
+        : registered;
+    if (candidate !== registered) {
+      this.registry.update(candidate);
     }
     const attempt = await this.executor.transfer({
       workflowRunId: this.workflowRunId,

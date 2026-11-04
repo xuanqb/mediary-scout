@@ -1,0 +1,451 @@
+import { createHash } from "node:crypto";
+import type { ResourceCandidate, ResourceSnapshot, ResourceType } from "./domain.js";
+import type { ResourceCandidateLinkResolver, ResourceProvider, ResourceSearchInput } from "./ports.js";
+import {
+  classifySourceFailure,
+  mergeSourceHealth,
+  type SourceStatus,
+} from "./resource-source-health.js";
+
+/**
+ * TgtoDrive 资源源。它自家实例同时索引 re0 / 观影 / SeedHub 三个来源：
+ * - re0 返回 **115 转存分享**，搜索阶段只给 slug/source，链接要靠 copy-link 换，
+ *   而 copy-link 对未解锁条目会扣积分 —— 所以只在真正转存时才解析（见
+ *   TgtoShareLinkResolver），搜索阶段绝不批量调用。
+ * - 观影返回**磁力**，share_url 直接随搜索结果下发，零成本、零额外请求。
+ * - SeedHub 也有磁力，但一次搜索要 30s+，默认关闭。
+ *
+ * 目标网盘只支持 115（123/光鸭未配置；传 quark 上游直接 400），因此这个源只
+ * 挂在 115 盘上，allowedTypes 不含 115 时它不发请求。
+ */
+
+export const TGTO_DEFAULT_SOURCES = ["re0", "guanying"] as const;
+/** 上游是多源实时聚合：re0+观影实测 10–21s（SeedHub 单源再 +30s），所以默认
+ *  超时要留够余量 —— 25s 会偶发把一次正常搜索误判成 unreachable。 */
+export const TGTO_DEFAULT_TIMEOUT_MS = 50_000;
+export const TGTO_DEFAULT_COPY_LINK_TIMEOUT_MS = 90_000;
+export const TGTO_DEFAULT_MAX_POINTS = 0;
+
+export interface TgtoSearchItem {
+  title?: unknown;
+  message_text?: unknown;
+  remark?: unknown;
+  slug?: unknown;
+  source?: unknown;
+  provider?: unknown;
+  link_type?: unknown;
+  share_url?: unknown;
+  size?: unknown;
+  resource_specification?: unknown;
+  resolution?: unknown;
+  episode?: unknown;
+  subtitle_languages?: unknown;
+  subtitle_types?: unknown;
+  supported_targets?: unknown;
+  validate_status?: unknown;
+  unlock_points?: unknown;
+  points_known?: unknown;
+  is_unlocked?: unknown;
+  item_key?: unknown;
+  published_at?: unknown;
+}
+
+export interface TgtoSearchData {
+  items: TgtoSearchItem[];
+  errors: unknown[];
+}
+
+export interface TgtoCopyLinkResult {
+  url: string;
+  password: string;
+  points: number;
+  alreadyOwned: boolean;
+}
+
+export interface TgtoFetchJson {
+  (url: string, init: {
+    method: "POST" | "GET";
+    headers: Record<string, string>;
+    body?: string;
+    timeoutMs?: number;
+  }): Promise<unknown>;
+}
+
+export interface TgtoClientOptions {
+  baseUrl: string;
+  token: string;
+  fetchJson?: TgtoFetchJson;
+  /** 搜索超时。 */
+  timeoutMs?: number;
+  /** copy-link 换链超时：上游要现场解析分享，实测 10–20s，偶发更久。 */
+  copyLinkTimeoutMs?: number;
+}
+
+/** A candidate marked for lazy copy-link: still no url at search time. */
+export interface TgtoCandidateRef {
+  slug: string;
+  source: string;
+  provider: string;
+}
+
+const TGTO_PAYLOAD_KEY = "tgto";
+
+export class TgtoClient {
+  private readonly baseUrl: string;
+  private readonly token: string;
+  private readonly fetchJson: TgtoFetchJson;
+  private readonly timeoutMs: number;
+  private readonly copyLinkTimeoutMs: number;
+
+  constructor(options: TgtoClientOptions) {
+    this.baseUrl = options.baseUrl.trim().replace(/\/+$/, "");
+    this.token = options.token.trim();
+    this.fetchJson = options.fetchJson ?? defaultFetchJson;
+    this.timeoutMs = options.timeoutMs ?? TGTO_DEFAULT_TIMEOUT_MS;
+    this.copyLinkTimeoutMs = options.copyLinkTimeoutMs ?? TGTO_DEFAULT_COPY_LINK_TIMEOUT_MS;
+  }
+
+  private async post(path: string, body: Record<string, unknown>, timeoutMs = this.timeoutMs): Promise<unknown> {
+    if (!this.baseUrl || !this.token) {
+      throw new Error("TGTO_NOT_CONFIGURED");
+    }
+    return this.fetchJson(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      timeoutMs,
+    });
+  }
+
+  async searchResources(body: Record<string, unknown>): Promise<TgtoSearchData> {
+    const raw = await this.post("/api/media/resources/search", body);
+    const envelope = asRecord(raw);
+    if (envelope["success"] !== true) {
+      throw new Error(`TGTO_SEARCH_FAILED: ${stringValue(envelope["error"]) || "upstream rejected the search"}`);
+    }
+    const data = asRecord(envelope["data"]);
+    return { items: asArray(data["items"]) as TgtoSearchItem[], errors: asArray(data["errors"]) };
+  }
+
+  /** 换取分享链接。**会按条目 unlock_points 扣积分**，只由转存路径调用。 */
+  async copyLink(input: TgtoCandidateRef): Promise<TgtoCopyLinkResult> {
+    const raw = await this.post(
+      "/api/media/resources/copy-link",
+      { provider: input.provider, slug: input.slug, source: input.source },
+      this.copyLinkTimeoutMs,
+    );
+    const envelope = asRecord(raw);
+    const data = asRecord(envelope["data"]);
+    const url = stringValue(data["share_url"]);
+    if (envelope["success"] !== true || !url) {
+      const message = stringValue(data["message"]) || stringValue(envelope["error"]) || "copy-link returned no share url";
+      throw new Error(`TGTO_COPY_LINK_FAILED: ${message}`);
+    }
+    return {
+      url,
+      password: passwordOf(data, url),
+      points: numberValue(data["points"]),
+      alreadyOwned: data["already_owned"] === true,
+    };
+  }
+}
+
+export interface TgtoResourceProviderOptions {
+  client: TgtoClient;
+  /** 资源来源（re0/guanying/seedhub）。默认 re0+观影；SeedHub 单次 30s+，不建议默认开。 */
+  sources?: readonly string[];
+  /** 只保留 unlock_points ≤ 该值的条目。默认 0 = 只收已解锁/免费资源，绝不自动扣分。 */
+  maxPoints?: number;
+  /** 与 PanSou/Haisou 同义；Tgto 只能转 115，因此不含 115 时整源跳过。 */
+  allowedTypes?: readonly ResourceType[];
+  now?: () => string;
+}
+
+export class TgtoResourceProvider implements ResourceProvider, ResourceCandidateLinkResolver {
+  private readonly client: TgtoClient;
+  private readonly resolver: TgtoShareLinkResolver;
+  private readonly sources: readonly string[];
+  private readonly maxPoints: number;
+  private readonly allowedTypes: readonly ResourceType[] | undefined;
+  private readonly now: () => string;
+
+  constructor(options: TgtoResourceProviderOptions) {
+    this.client = options.client;
+    this.resolver = new TgtoShareLinkResolver(options.client);
+    this.sources = options.sources && options.sources.length > 0 ? options.sources : TGTO_DEFAULT_SOURCES;
+    this.maxPoints = options.maxPoints ?? TGTO_DEFAULT_MAX_POINTS;
+    this.allowedTypes = options.allowedTypes;
+    this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
+    const keyword = input.keyword.trim();
+    const snapshotId = scopedId("tgto", keyword, input.workflowRunId);
+
+    if (this.allowedTypes && !this.allowedTypes.includes("115")) {
+      return emptySnapshot(snapshotId, keyword, this.now());
+    }
+    if (!keyword) {
+      return emptySnapshot(snapshotId, keyword, this.now());
+    }
+
+    const context = input.context;
+    const title = context?.title?.trim() || keyword;
+    const seasons = context?.seasons ?? [];
+    // 多季任务不要传 season：re0 的整包候选带季集标记，传单个季会把别的季过滤掉。
+    const season = seasons.length === 1 ? seasons[0] : undefined;
+
+    let data: TgtoSearchData;
+    try {
+      data = await this.client.searchResources({
+        title,
+        provider: "115",
+        sources: [...this.sources],
+        ...(context?.tmdbId ? { tmdb_id: context.tmdbId } : {}),
+        ...(context?.mediaType ? { media_type: context.mediaType } : {}),
+        ...(context?.year ? { year: context.year } : {}),
+        ...(context?.aliases && context.aliases.length > 0 ? { aliases: context.aliases } : {}),
+        ...(season === undefined ? {} : { season }),
+      });
+    } catch (error) {
+      return emptySnapshot(snapshotId, keyword, this.now(), classifySourceFailure(error));
+    }
+
+    const candidates: ResourceCandidate[] = [];
+    for (const raw of data.items) {
+      const candidate = this.toCandidate(raw, snapshotId, candidates.length);
+      if (candidate) candidates.push(candidate);
+    }
+
+    return {
+      id: snapshotId,
+      provider: "tgto",
+      keyword,
+      candidates,
+      createdAt: this.now(),
+      // An empty result WITH upstream errors is not an authoritative "no such
+      // resource" — say degraded so the UI/agent knows the source wobbled.
+      sourceHealth: mergeSourceHealth([
+        { status: candidates.length === 0 && data.errors.length > 0 ? "degraded" : "healthy", source: "tgto" },
+      ]),
+    };
+  }
+
+  /** See ResourceCandidateLinkResolver — paid copy-link only happens here. */
+  async resolveCandidateLink(candidate: ResourceCandidate): Promise<ResourceCandidate> {
+    return this.resolver.resolve(candidate);
+  }
+
+  private toCandidate(item: TgtoSearchItem, snapshotId: string, index: number): ResourceCandidate | null {
+    if (stringValue(item.validate_status) === "invalid") return null;
+
+    const targets = asArray(item.supported_targets).map((t) => stringValue(t));
+    if (targets.length > 0 && !targets.includes("115")) return null;
+
+    // points_known=false 时无法判断成本 → 当作需要积分，宁可不收也不盲扣。
+    const pointsKnown = item.points_known === true;
+    const unlockPoints = numberValue(item.unlock_points);
+    if (!pointsKnown || unlockPoints > this.maxPoints) return null;
+
+    const linkType = stringValue(item.link_type).toLowerCase();
+    const source = stringValue(item.source);
+    const shareUrl = stringValue(item.share_url);
+    const slug = stringValue(item.slug);
+    const directMagnet = linkType === "magnet" && /^magnet:/i.test(shareUrl);
+
+    if (!directMagnet) {
+      // 分享链要 slug+source 才能换链；缺任何一个这条候选都不可转。
+      if (linkType !== "share" || !slug || !source) return null;
+    }
+
+    const title = candidateTitle(item);
+    if (!title) return null;
+
+    const ref: TgtoCandidateRef | undefined = directMagnet
+      ? undefined
+      : { slug, source, provider: stringValue(item.provider) || "115" };
+    const datetime = stringValue(item.published_at).slice(0, 10);
+
+    return {
+      id: `${snapshotId}:${index}`,
+      snapshotId,
+      index,
+      title,
+      type: directMagnet ? "magnet" : "115",
+      source: "tgto",
+      providerPayload: {
+        title: stringValue(item.title) || title,
+        // 磁力直接带链接；分享链故意留空，转存时由 resolver 调 copy-link。
+        ...(directMagnet ? { url: shareUrl, ...(infoHashOf(shareUrl) ? { infoHash: infoHashOf(shareUrl) } : {}) } : {}),
+        ...(ref ? { [TGTO_PAYLOAD_KEY]: ref, targetProvider: "115" } : {}),
+        sizeBytes: parseSizeToBytes(stringValue(item.size)),
+        resolution: stringValue(item.resolution),
+        unlockPoints,
+        ...(datetime.length === 10 ? { datetime } : {}),
+      },
+    };
+  }
+}
+
+/**
+ * 把「搜索时还没有链接」的 Tgto 分享候选，在真正转存的那一刻换成 115 分享链。
+ * copy-link 是唯一会扣积分的调用点；解锁过的条目之后 already_owned=true、points=0。
+ */
+export class TgtoShareLinkResolver {
+  private readonly client: TgtoClient;
+
+  constructor(client: TgtoClient) {
+    this.client = client;
+  }
+
+  /** 非 Tgto 候选原样返回；Tgto 分享候选返回带 url/password 的新候选。 */
+  async resolve(candidate: ResourceCandidate): Promise<ResourceCandidate> {
+    const existing = stringValue(candidate.providerPayload?.["url"]);
+    if (existing) return candidate;
+    const ref = tgtoRefOf(candidate);
+    if (!ref) return candidate;
+
+    const link = await this.client.copyLink(ref);
+    return {
+      ...candidate,
+      providerPayload: {
+        ...candidate.providerPayload,
+        url: link.url,
+        ...(link.password ? { password: link.password } : {}),
+        tgtoPointsSpent: link.points,
+      },
+    };
+  }
+}
+
+export function tgtoRefOf(candidate: ResourceCandidate): TgtoCandidateRef | null {
+  const raw = candidate.providerPayload?.[TGTO_PAYLOAD_KEY];
+  if (typeof raw !== "object" || raw === null) return null;
+  const ref = raw as Record<string, unknown>;
+  const slug = stringValue(ref["slug"]);
+  const source = stringValue(ref["source"]);
+  const provider = stringValue(ref["provider"]) || "115";
+  if (!slug || !source) return null;
+  return { slug, source, provider };
+}
+
+function candidateTitle(item: TgtoSearchItem): string {
+  const base =
+    stringValue(item.title) || stringValue(item.message_text) || stringValue(item.remark);
+  const spec = stringValue(item.resource_specification);
+  const episode = episodeLabel(item.episode);
+  const subtitles = subtitleLabel(item);
+  const size = stringValue(item.size);
+  return [base, spec, episode, subtitles, size].filter((part) => part.length > 0).join(" · ");
+}
+
+/** 「字幕:简中/繁中(内封)」——质量判断之外，中字语言与内封/外挂也是选片依据。 */
+function subtitleLabel(item: TgtoSearchItem): string {
+  const languages = asArray(item.subtitle_languages).map((v) => stringValue(v)).filter((v) => v.length > 0);
+  const types = asArray(item.subtitle_types).map((v) => stringValue(v)).filter((v) => v.length > 0);
+  if (languages.length === 0 && types.length === 0) return "";
+  const language = languages.length > 0 ? languages.join("/") : "字幕";
+  return `字幕:${language}${types.length > 0 ? `(${types.join("/")})` : ""}`;
+}
+
+/** 集号标记（S01E01-E08）。season_num 缺失时退回上游的原始文本（re0 的 "E01 - E08"）。 */
+function episodeLabel(raw: unknown): string {
+  const ep = asRecord(raw);
+  const kind = stringValue(ep["kind"]);
+  if (!kind || kind === "none") return "";
+  const season = numberOrNull(ep["season_num"]);
+  const first = numberOrNull(ep["episode_num"]);
+  const last = numberOrNull(ep["end_episode_num"]);
+  if (first === null) return stringValue(ep["source_text"]).trim();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const prefix = season === null ? "" : `S${pad(season)}`;
+  return last !== null && last !== first ? `${prefix}E${pad(first)}-E${pad(last)}` : `${prefix}E${pad(first)}`;
+}
+
+/** "81.10GB" / "896.57M" / "4.39G" → bytes. Unknown shape → 0 (the V2 view treats
+ *  a non-positive size as absent). */
+export function parseSizeToBytes(raw: string): number {
+  const match = /^\s*([\d.]+)\s*([KMGT]?)i?B?\s*$/i.exec(raw);
+  if (!match) return 0;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  const unit = (match[2] ?? "").toUpperCase();
+  const factor = unit === "T" ? 1024 ** 4 : unit === "G" ? 1024 ** 3 : unit === "M" ? 1024 ** 2 : unit === "K" ? 1024 : 1;
+  return Math.round(value * factor);
+}
+
+function passwordOf(data: Record<string, unknown>, url: string): string {
+  const declared = stringValue(data["password"]);
+  if (declared) return declared;
+  try {
+    return new URL(url).searchParams.get("password") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function infoHashOf(magnet: string): string {
+  const match = /urn:btih:([0-9a-z]+)/i.exec(magnet);
+  return match?.[1] ?? "";
+}
+
+function emptySnapshot(
+  id: string,
+  keyword: string,
+  createdAt: string,
+  health?: SourceStatus,
+): ResourceSnapshot {
+  const snapshot: ResourceSnapshot = { id, provider: "tgto", keyword, candidates: [], createdAt };
+  if (health) snapshot.sourceHealth = mergeSourceHealth([{ status: health, source: "tgto" }]);
+  return snapshot;
+}
+
+function scopedId(provider: string, keyword: string, workflowRunId?: string): string {
+  const hash = createHash("sha256").update(`${provider}:${keyword}`).digest("hex").slice(0, 16);
+  return workflowRunId ? `${workflowRunId}:${hash}` : `${provider}-${hash}`;
+}
+
+async function defaultFetchJson(
+  url: string,
+  init: {
+    method: "POST" | "GET";
+    headers: Record<string, string>;
+    body?: string;
+    timeoutMs?: number;
+  },
+): Promise<unknown> {
+  const response = await fetch(url, {
+    method: init.method,
+    headers: init.headers,
+    ...(init.body === undefined ? {} : { body: init.body }),
+    signal: AbortSignal.timeout(init.timeoutMs ?? TGTO_DEFAULT_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new Error(`tgto upstream HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}

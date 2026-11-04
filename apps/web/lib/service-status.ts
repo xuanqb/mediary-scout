@@ -145,6 +145,28 @@ export function haisouPills(input: { apiKeySet: boolean; fromEnv: boolean }): Se
   return [first, ...source, { label: "每日 100 次免费", tone: "neutral" }];
 }
 
+/** Tgto：地址 + token 齐全才算接上。积分上限如实显示 —— 0 表示只收免费资源，
+ *  这是用户最需要一眼看到的安全边界。 */
+export function tgtoPills(input: {
+  baseUrlSet: boolean;
+  tokenSet: boolean;
+  fromEnv: boolean;
+  maxPoints: number;
+}): ServicePill[] {
+  const connected = input.baseUrlSet && input.tokenSet;
+  const first: ServicePill = connected
+    ? { label: "已接入", tone: "on" }
+    : input.baseUrlSet || input.tokenSet
+      ? { label: "配置不全", tone: "warn" }
+      : { label: "未配置", tone: "off" };
+  const source = connected && input.fromEnv ? [ENV_SOURCE_PILL] : [];
+  return [
+    first,
+    ...source,
+    { label: input.maxPoints > 0 ? `最多解锁 ${input.maxPoints} 积分` : "不自动扣积分", tone: "neutral" },
+  ];
+}
+
 /** Emby：baseURL / apiKeySet 都来自账号设置（不读 env），两者齐全才算接上。
  *  「已有集跳过搜索」恒带 —— 它是这个联动的全部目的，不接上时不展示。 */
 export function embyPills(input: { baseURL: string; apiKeySet: boolean }): ServicePill[] {

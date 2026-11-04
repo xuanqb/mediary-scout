@@ -57,6 +57,8 @@ export interface RunMovieAcquisitionV2Request {
   /** Optional Jev candidate prefilter (see orchestrator.jevJudge). */
   jevJudge?: JevJudge;
   deadLinkStore?: DeadLinkStore;
+  /** See orchestrator.resolveCandidateLink (Tgto: lazy copy-link at transfer time). */
+  resolveCandidateLink?: RunAcquisitionV2Request["resolveCandidateLink"];
   /** Agent memory (see orchestrator.memory). */
   memory?: { store: AgentMemoryStore; accountId: string; drive?: string };
   /** A replace_request run (see orchestrator.userRequest; requestedEpisodes ["MOVIE"]). */
@@ -158,6 +160,7 @@ export async function runMovieAcquisitionV2(
     ...(request.assrtToken === undefined ? {} : { assrtToken: request.assrtToken }),
     ...(request.jevJudge === undefined ? {} : { jevJudge: request.jevJudge }),
     ...(request.deadLinkStore ? { deadLinkStore: request.deadLinkStore } : {}),
+    ...(request.resolveCandidateLink ? { resolveCandidateLink: request.resolveCandidateLink } : {}),
     ...(request.memory ? { memory: request.memory } : {}),
     ...(request.userRequest ? { userRequest: request.userRequest } : {}),
     ...(request.protectExisting ? { protectExisting: request.protectExisting } : {}),

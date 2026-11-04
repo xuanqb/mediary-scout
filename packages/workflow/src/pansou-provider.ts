@@ -5,7 +5,7 @@ import type {
   ResourceSnapshot,
   ResourceType,
 } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceProvider, ResourceSearchInput } from "./ports.js";
 import {
   classifySourceFailure,
   mergeSourceHealth,
@@ -133,7 +133,7 @@ export class PanSouResourceProvider implements ResourceProvider {
     return this.allowedTypes ? facts.filter((fact) => this.allowedTypes!.has(fact.type)) : facts;
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     // The slot covers the whole poll loop, not each request: between polls PanSou
     // is still fanning the search out to its channels, which is the load that 502s.
     return withServerSlot(this.baseURL, () => this.pollSearch(input));

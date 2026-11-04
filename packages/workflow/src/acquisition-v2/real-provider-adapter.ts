@@ -1,5 +1,5 @@
 import type { ResourceSnapshot } from "../domain.js";
-import type { ResourceProvider } from "../ports.js";
+import type { ResourceProvider, ResourceSearchContext } from "../ports.js";
 import { resourceFingerprintMatches } from "../user-requests.js";
 import type { CandidateRegistry } from "./candidate-registry.js";
 import { deadLinkKey, type DeadLinkStore } from "./dead-links.js";
@@ -39,6 +39,9 @@ export interface RealResourceProviderV2Options {
   };
   /** resourceLinkKey → the note for that link. Absent = no history this run. */
   linkHistory?: ReadonlyMap<string, string>;
+  /** This run's title identity, forwarded to providers whose own API takes more
+   *  than a keyword (Tgto). Keyword-only providers ignore it. */
+  searchContext?: ResourceSearchContext;
 }
 
 export class RealResourceProviderV2 implements ResourceProviderV2 {
@@ -48,6 +51,7 @@ export class RealResourceProviderV2 implements ResourceProviderV2 {
   private readonly deadLinkStore: DeadLinkStore | undefined;
   private readonly rejectedResources: RealResourceProviderV2Options["rejectedResources"];
   private readonly linkHistory: ReadonlyMap<string, string> | undefined;
+  private readonly searchContext: ResourceSearchContext | undefined;
   private readonly observedSnapshots = new Map<string, ResourceSnapshot>();
   /** real snapshot id → `sN`. Content-addressed providers repeat a snapshot id
    *  across keywords; the same snapshot keeps the same alias. */
@@ -60,6 +64,7 @@ export class RealResourceProviderV2 implements ResourceProviderV2 {
     this.deadLinkStore = options.deadLinkStore;
     this.rejectedResources = options.rejectedResources;
     this.linkHistory = options.linkHistory;
+    this.searchContext = options.searchContext;
   }
 
   /** The domain snapshots observed this run (deduped by id — content-addressed
@@ -69,7 +74,11 @@ export class RealResourceProviderV2 implements ResourceProviderV2 {
   }
 
   async search(keyword: string): Promise<ResourceSnapshotV2> {
-    const snapshot = await this.provider.search({ keyword, workflowRunId: this.workflowRunId });
+    const snapshot = await this.provider.search({
+      keyword,
+      workflowRunId: this.workflowRunId,
+      ...(this.searchContext ? { context: this.searchContext } : {}),
+    });
     // A dead-link read error fails the search. Filtering nothing instead would show
     // every link already proven dead — and let the agent transfer it again. Only the
     // rejected list below fails open (best effort by design).

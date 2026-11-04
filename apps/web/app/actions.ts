@@ -999,6 +999,88 @@ export async function clearHaisouConfigAction(): Promise<PushSettingsActionResul
   }
 }
 
+/** TgtoDrive（自建实例）的 OpenAPI。保存前用一次免费的 re0 搜索验证地址与 token；
+ *  积分上限只写配置，探测绝不会调用 copy-link（那是唯一扣积分的接口）。 */
+export async function saveTgtoConfigAction(input: {
+  baseUrl: string;
+  token: string;
+  maxPoints: number;
+  sources: string[];
+}): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
+  const typedToken = input.token.trim();
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    return { success: false, message: "请填入以 http:// 或 https:// 开头的地址" };
+  }
+  if (!Number.isInteger(input.maxPoints) || input.maxPoints < 0) {
+    return { success: false, message: "积分上限必须是不小于 0 的整数（0 = 不自动扣分）" };
+  }
+  const sources = [...new Set(input.sources.map((s) => s.trim()).filter((s) => s.length > 0))];
+  if (sources.length === 0) {
+    return { success: false, message: "至少选择一个资源来源" };
+  }
+  const allowedSources = new Set(["re0", "guanying", "seedhub"]);
+  if (sources.some((source) => !allowedSources.has(source))) {
+    return { success: false, message: "资源来源只能是 re0 / guanying / seedhub" };
+  }
+  try {
+    const {
+      getWorkflowRepository,
+      getCurrentAccountId,
+      TGTO_BASE_URL_SETTING_KEY,
+      TGTO_API_TOKEN_SETTING_KEY,
+      TGTO_MAX_POINTS_SETTING_KEY,
+      TGTO_SOURCES_SETTING_KEY,
+    } = await import("../lib/workflow-runtime");
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    // 留空 token = 保留原值（与其它密码框一致的「留空不改」）。
+    const token =
+      typedToken || ((await repository.getAccountSetting(accountId, TGTO_API_TOKEN_SETTING_KEY))?.trim() ?? "");
+    if (!token) {
+      return { success: false, message: "请填入 API Token" };
+    }
+    const { TgtoClient } = await import("@media-track/workflow");
+    const client = new TgtoClient({ baseUrl, token });
+    await client.searchResources({ title: "沙丘", provider: "115", sources: ["re0"] });
+    await repository.setAccountSetting(accountId, TGTO_BASE_URL_SETTING_KEY, baseUrl);
+    await repository.setAccountSetting(accountId, TGTO_API_TOKEN_SETTING_KEY, token);
+    await repository.setAccountSetting(accountId, TGTO_MAX_POINTS_SETTING_KEY, String(input.maxPoints));
+    await repository.setAccountSetting(accountId, TGTO_SOURCES_SETTING_KEY, sources.join(","));
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `保存失败：${String(error)}` };
+  }
+}
+
+export async function clearTgtoConfigAction(): Promise<PushSettingsActionResult> {
+  assertNotDemo();
+  try {
+    const {
+      getWorkflowRepository,
+      getCurrentAccountId,
+      TGTO_BASE_URL_SETTING_KEY,
+      TGTO_API_TOKEN_SETTING_KEY,
+      TGTO_MAX_POINTS_SETTING_KEY,
+      TGTO_SOURCES_SETTING_KEY,
+    } = await import("../lib/workflow-runtime");
+    const repository = getWorkflowRepository();
+    const accountId = await getCurrentAccountId();
+    for (const key of [
+      TGTO_BASE_URL_SETTING_KEY,
+      TGTO_API_TOKEN_SETTING_KEY,
+      TGTO_MAX_POINTS_SETTING_KEY,
+      TGTO_SOURCES_SETTING_KEY,
+    ]) {
+      await repository.setAccountSetting(accountId, key, "");
+    }
+    return { success: true };
+  } catch (error) {
+    return { success: false, message: `清除失败：${String(error)}` };
+  }
+}
+
 export async function saveJevConfigAction(input: {
   apiKey: string;
   baseUrl: string;

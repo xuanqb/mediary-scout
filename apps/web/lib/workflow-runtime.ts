@@ -15,6 +15,10 @@ import {
   CompositeResourceProvider,
   ProwlarrResourceProvider,
   HaisouResourceProvider,
+  TgtoClient,
+  TgtoResourceProvider,
+  TGTO_DEFAULT_MAX_POINTS,
+  TGTO_DEFAULT_SOURCES,
   createJevJudge,
   DEFAULT_JEV_BASE_URL,
   type JevJudge,
@@ -1580,6 +1584,45 @@ export async function getHaisouApiKey(
   return envValue ? envValue : undefined;
 }
 
+export const TGTO_BASE_URL_SETTING_KEY = "tgto_base_url";
+export const TGTO_API_TOKEN_SETTING_KEY = "tgto_api_token";
+export const TGTO_MAX_POINTS_SETTING_KEY = "tgto_max_points";
+export const TGTO_SOURCES_SETTING_KEY = "tgto_sources";
+
+export interface TgtoConfig {
+  baseUrl: string;
+  token: string;
+  /** 单条资源允许解锁的最大积分。0（默认）= 只转已解锁/免费资源，绝不自动扣分。 */
+  maxPoints: number;
+  /** 资源来源（re0 / guanying / seedhub）。默认 re0+观影；SeedHub 单次 30s+。 */
+  sources: string[];
+}
+
+/** TgtoDrive（自建 Tgto 实例）的 OpenAPI 配置。只对 115 盘有用 —— 上游的
+ *  quark 目标直接 400，123/光鸭需要另外配置。 */
+export async function getTgtoConfig(
+  repository: { getSetting(key: string): Promise<string | null> },
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<TgtoConfig | undefined> {
+  const read = async (key: string, envKey: string): Promise<string | undefined> => {
+    const dbValue = (await repository.getSetting(key))?.trim();
+    if (dbValue) return dbValue;
+    const envValue = env[envKey]?.trim();
+    return envValue ? envValue : undefined;
+  };
+  const baseUrl = await read(TGTO_BASE_URL_SETTING_KEY, "TGTO_BASE_URL");
+  const token = await read(TGTO_API_TOKEN_SETTING_KEY, "TGTO_API_TOKEN");
+  if (!baseUrl || !token) return undefined;
+  const rawMax = await read(TGTO_MAX_POINTS_SETTING_KEY, "TGTO_MAX_POINTS");
+  const parsedMax = rawMax === undefined ? NaN : Number.parseInt(rawMax, 10);
+  const maxPoints = Number.isFinite(parsedMax) && parsedMax >= 0 ? parsedMax : TGTO_DEFAULT_MAX_POINTS;
+  const rawSources = await read(TGTO_SOURCES_SETTING_KEY, "TGTO_SOURCES");
+  const sources = rawSources
+    ? rawSources.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : [...TGTO_DEFAULT_SOURCES];
+  return { baseUrl, token, maxPoints, sources };
+}
+
 export const JEV_API_KEY_SETTING_KEY = "jev_api_key";
 export const JEV_BASE_URL_SETTING_KEY = "jev_base_url";
 export const JEV_PREFILTER_ENABLED_SETTING_KEY = "jev_prefilter_enabled";
@@ -2423,6 +2466,22 @@ export async function getWorkerResourceProvider(
       providers.push({
         name: "haisou",
         provider: new HaisouResourceProvider({ apiKey: haisouApiKey, allowedTypes }),
+      });
+    }
+    // TgtoDrive：自建实例聚合 re0（115 转存分享）/ 观影（磁力）/ SeedHub（磁力）。
+    // 只有 115 目标可用；分享链在搜索时没有链接，转存那一刻才调 copy-link 换链
+    // （见 TgtoResourceProvider.resolveCandidateLink），所以 maxPoints 默认 0 ——
+    // 不配置就绝不会扣积分。
+    const tgto = await getTgtoConfig(settings);
+    if (tgto && allowedTypes.includes("115")) {
+      providers.push({
+        name: "tgto",
+        provider: new TgtoResourceProvider({
+          client: new TgtoClient({ baseUrl: tgto.baseUrl, token: tgto.token }),
+          sources: tgto.sources,
+          maxPoints: tgto.maxPoints,
+          allowedTypes,
+        }),
       });
     }
     return providers.length > 1

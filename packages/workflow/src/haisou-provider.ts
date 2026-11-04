@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ResourceCandidate, ResourceSnapshot, ResourceType } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceProvider, ResourceSearchInput } from "./ports.js";
 import { normalizeResourceType } from "./pansou-provider.js";
 import {
   classifySourceFailure,
@@ -84,7 +84,7 @@ export class HaisouResourceProvider implements ResourceProvider {
     return u.toString();
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     const keyword = input.keyword.trim();
     const snapshotId = scopedId("haisou", keyword, input.workflowRunId);
 

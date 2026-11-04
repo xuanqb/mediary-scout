@@ -1,5 +1,5 @@
 import type { ResourceSnapshot } from "./domain.js";
-import type { ResourceProvider } from "./ports.js";
+import type { ResourceProvider, ResourceSearchInput } from "./ports.js";
 import {
   classifySourceFailure,
   mergeSourceHealth,
@@ -35,7 +35,7 @@ export class FallbackResourceProvider implements ResourceProvider {
     this.secondary = options.secondary;
   }
 
-  async search(input: { keyword: string; workflowRunId?: string }): Promise<ResourceSnapshot> {
+  async search(input: ResourceSearchInput): Promise<ResourceSnapshot> {
     const primary = await attempt(this.primary.provider, input);
     if (primary.ok && isUsable(primary.snapshot)) {
       return primary.snapshot;

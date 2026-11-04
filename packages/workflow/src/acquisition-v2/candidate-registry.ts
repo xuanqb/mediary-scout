@@ -21,4 +21,15 @@ export class CandidateRegistry {
   get(candidateId: string): ResourceCandidate | undefined {
     return this.byId.get(candidateId);
   }
+
+  /** Replace every entry (real id and agent alias) that points at this candidate.
+   *  Used when a lazy link is resolved at transfer time, so retries and the alias
+   *  view see the url instead of re-resolving a paid link. */
+  update(candidate: ResourceCandidate): void {
+    for (const [key, value] of this.byId) {
+      if (value.id === candidate.id) {
+        this.byId.set(key, candidate);
+      }
+    }
+  }
 }
