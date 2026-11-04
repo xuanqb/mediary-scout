@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { Film, RefreshCw, Search } from "lucide-react";
 import { getTrending, TRENDING_KINDS, TRENDING_KIND_ORDER, type TrendingKind } from "../lib/trending";
-
-const POSTER = "https://image.tmdb.org/t/p/w342";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 
 /** The search page's empty-state discovery row. When getTrending yields []
  *  (proxy/network down) it falls back to the original "输入目标名称" placeholder,
@@ -56,7 +55,7 @@ export async function TrendingRow({
             <div className="trending-poster">
               {card.posterPath ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`${POSTER}${card.posterPath}`} alt="" loading="lazy" />
+                <img src={tmdbImageUrl(card.posterPath)} alt="" loading="lazy" />
               ) : (
                 <Film size={24} aria-hidden />
               )}

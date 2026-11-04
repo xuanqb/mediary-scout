@@ -21,6 +21,7 @@ import { LibraryCategorySelect } from "../../../components/library-category-sele
 import { AgentMemoryNotes } from "../../../components/agent-memory-panel";
 import { UserMessageThread } from "../../../components/user-message-thread";
 import { isDemoMode } from "../../../lib/demo-mode";
+import { tmdbImageUrl } from "../../../lib/tmdb-image";
 import type { DemoAcquisitionEntry } from "../../../lib/demo-session";
 import {
   getDetailView,
@@ -198,7 +199,7 @@ function TvHub({
         {view.backdropPath ? (
           <div
             className="hub-backdrop"
-            style={{ backgroundImage: `url(https://image.tmdb.org/t/p/w1280${view.backdropPath})` }}
+            style={{ backgroundImage: `url(${tmdbImageUrl(view.backdropPath, "w500")})` }}
             aria-hidden
           />
         ) : null}
@@ -208,7 +209,7 @@ function TvHub({
           {view.posterPath ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={`https://image.tmdb.org/t/p/w342${view.posterPath}`}
+              src={tmdbImageUrl(view.posterPath)}
               alt={`${view.title} 海报`}
             />
           ) : (
@@ -356,7 +357,7 @@ function MovieHub({
           {view.backdropPath ? (
             <div
               className="hub-backdrop"
-              style={{ backgroundImage: `url(https://image.tmdb.org/t/p/w1280${view.backdropPath})` }}
+              style={{ backgroundImage: `url(${tmdbImageUrl(view.backdropPath, "w500")})` }}
               aria-hidden
             />
           ) : null}
@@ -365,7 +366,7 @@ function MovieHub({
             <div className="hub-poster">
               {view.posterPath ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`https://image.tmdb.org/t/p/w342${view.posterPath}`} alt={`${view.title} 海报`} />
+                <img src={tmdbImageUrl(view.posterPath)} alt={`${view.title} 海报`} />
               ) : (
                 <span className="poster-fallback">{view.title.slice(0, 4)}</span>
               )}

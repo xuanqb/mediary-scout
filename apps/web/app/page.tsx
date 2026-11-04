@@ -13,6 +13,7 @@ import { SeasonRequestMenu } from "../components/season-request-menu";
 import { TrendingRow } from "../components/trending-row";
 import { GitHubNameplate } from "../components/github-nameplate";
 import type { TrendingKind } from "../lib/trending";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 import { getSearchView } from "../lib/search-page";
 import { getInProgressTitles, getLibraryWall } from "../lib/title-hub";
 import {
@@ -351,7 +352,7 @@ function CandidateCard({
       <Link className="candidate-poster" href={showHref(candidate.tmdbId, "search", storageId, candidate.mediaType)} aria-hidden tabIndex={-1}>
         {candidate.posterPath ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={`https://image.tmdb.org/t/p/w342${candidate.posterPath}`} alt="" loading="lazy" />
+          <img src={tmdbImageUrl(candidate.posterPath)} alt="" loading="lazy" />
         ) : (
           <span>{candidate.title.slice(0, 4)}</span>
         )}

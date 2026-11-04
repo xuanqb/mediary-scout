@@ -23,6 +23,7 @@ import { NotificationsSeenMarker } from "../../components/notifications-seen-mar
 import { DemoSessionNotifications } from "../../components/demo-session-notifications";
 import { AppSidebar } from "../../components/app-sidebar";
 import { GitHubNameplate } from "../../components/github-nameplate";
+import { tmdbImageUrl } from "../../lib/tmdb-image";
 import {
   ensureDemoSeeded,
   getCurrentAccountId,
@@ -34,9 +35,6 @@ import {
 // The kind only drives the leading ICON now — its textual label used to render
 // as a second badge next to the status pill ("开始追踪" beside "已完结"), which
 // was redundant. The status pill is the single source of truth for state.
-// TMDB's own CDN — same source the push notification uses; w154 is a crisp
-// thumbnail for the feed card without shipping a self-hosted image.
-const TMDB_FEED_POSTER = "https://image.tmdb.org/t/p/w154";
 
 const kindIcon: Record<string, { tone: string; icon: typeof Bell }> = {
   series_initialized: { tone: "green", icon: Layers },
@@ -270,7 +268,7 @@ function NotificationCard({
   // The same TMDB poster the push uses — a small thumbnail turns the row into a
   // proper media card (parity with the WeChat/Bark notification).
   const posterPath = report.posterPath ?? fallbackPoster;
-  const posterUrl = posterPath ? `${TMDB_FEED_POSTER}${posterPath}` : null;
+  const posterUrl = posterPath ? tmdbImageUrl(posterPath) : null;
 
   return (
     <article className={`feed-card${posterUrl ? " has-poster" : ""}`} data-created-at={notification.createdAt}>

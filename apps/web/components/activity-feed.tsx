@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, ChevronDown, ChevronRight, Clock3, Loader2, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { showHref } from "@media-track/workflow/scope";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 import type {
   ActivityActiveRun,
   ActivityCompletedItem,
@@ -20,7 +21,6 @@ import { demoCompletedItems, demoInProgressActivityItems } from "../lib/demo-ses
 import { useDemoAcquisitions, useDemoInProgress } from "../lib/use-demo-session";
 
 const POLL_MS = 2600;
-const POSTER = "https://image.tmdb.org/t/p/w185";
 
 export function ActivityFeed({ storageId }: { storageId?: string | undefined }) {
   // 已完成 is session-scoped by OBSERVATION: the runIds this browser saw active.
@@ -108,7 +108,7 @@ export function ActivityFeed({ storageId }: { storageId?: string | undefined }) 
 function poster(posterPath: string | null, title: string, tone: string) {
   return posterPath ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img className="act-poster" src={`${POSTER}${posterPath}`} alt="" loading="lazy" />
+    <img className="act-poster" src={tmdbImageUrl(posterPath)} alt="" loading="lazy" />
   ) : (
     <span className={`act-poster act-poster-fallback tone-${tone}`}>{title.slice(0, 2)}</span>
   );

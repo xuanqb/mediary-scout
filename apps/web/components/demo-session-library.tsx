@@ -4,6 +4,7 @@ import { Check, LoaderCircle } from "lucide-react";
 import { isDemoModeClient } from "../lib/demo-mode";
 import { demoInProgressLibraryCards } from "../lib/demo-session";
 import { useDemoAcquisitions, useDemoInProgress } from "../lib/use-demo-session";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 
 /**
  * Read-only demo: top sections reflecting THIS session's activity (client-only
@@ -49,7 +50,7 @@ function DemoSessionLibraryInner() {
                 <span className="wall-poster">
                   {e.posterPath ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={`https://image.tmdb.org/t/p/w342${e.posterPath}`} alt="" loading="lazy" />
+                    <img src={tmdbImageUrl(e.posterPath)} alt="" loading="lazy" />
                   ) : (
                     <span className="poster-fallback">{e.title.slice(0, 4)}</span>
                   )}
@@ -78,7 +79,7 @@ function DemoSessionLibraryInner() {
             <span className="wall-poster">
               {e.posterPath ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={`https://image.tmdb.org/t/p/w342${e.posterPath}`} alt="" loading="lazy" />
+                <img src={tmdbImageUrl(e.posterPath)} alt="" loading="lazy" />
               ) : (
                 <span className="poster-fallback">{e.title.slice(0, 4)}</span>
               )}

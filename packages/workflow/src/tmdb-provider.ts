@@ -348,19 +348,32 @@ export class TmdbSearchProvider implements MediaSearchProvider {
       page: "1",
     });
     const results = parseSearchResults(response).slice(0, this.maxResults);
+    // TV candidates need their details to show seasons. Fetching them one by one
+    // made a 10-result search pay the proxy round-trip ten times (mainland users
+    // measured ~30s, often timing the page out). Run them concurrently; a single
+    // failed detail degrades that card to the multi-search payload instead of
+    // failing the whole query.
+    const tvResults = results
+      .filter((result) => result.media_type === "tv")
+      .slice(0, this.tvDetailsLimit);
+    const detailsById = new Map<number, TmdbTvDetails>();
+    await Promise.all(
+      tvResults.map(async (result) => {
+        try {
+          detailsById.set(result.id, await this.getTvDetails(result.id));
+        } catch {
+          // keep the search-result candidate without season enrichment
+        }
+      }),
+    );
     const candidates: MediaSearchCandidate[] = [];
-    let tvDetailsRequests = 0;
-
     for (const result of results) {
       if (result.media_type === "movie") {
         candidates.push(movieSearchCandidate(result));
       }
 
       if (result.media_type === "tv") {
-        const details =
-          tvDetailsRequests < this.tvDetailsLimit ? await this.getTvDetails(result.id) : null;
-        tvDetailsRequests += details ? 1 : 0;
-        candidates.push(tvSearchCandidate(result, details));
+        candidates.push(tvSearchCandidate(result, detailsById.get(result.id) ?? null));
       }
     }
 

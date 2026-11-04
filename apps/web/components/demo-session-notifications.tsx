@@ -4,8 +4,7 @@ import { CheckCircle2, PartyPopper } from "lucide-react";
 import { isDemoModeClient } from "../lib/demo-mode";
 import { demoSessionNotifications } from "../lib/demo-session";
 import { useDemoAcquisitions } from "../lib/use-demo-session";
-
-const TMDB_FEED_POSTER = "https://image.tmdb.org/t/p/w154";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 
 /**
  * Read-only demo: this session's acquisitions surfaced as 通知-feed cards (no DB
@@ -41,7 +40,7 @@ function DemoSessionNotificationsInner() {
         </header>
         <div className="feed-cards">
           {items.map((item) => {
-            const posterUrl = item.posterPath ? `${TMDB_FEED_POSTER}${item.posterPath}` : null;
+            const posterUrl = item.posterPath ? tmdbImageUrl(item.posterPath) : null;
             const heading = item.year ? `${item.title} (${item.year})` : item.title;
             return (
               <article

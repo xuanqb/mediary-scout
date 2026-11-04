@@ -622,6 +622,33 @@ describe("TmdbMetadataProvider", () => {
 });
 
 describe("TmdbSearchProvider", () => {
+  it("fetches TV details concurrently (proxy round-trip is not paid once per result)", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const provider = new TmdbSearchProvider({
+      readToken: "token",
+      baseURL: "https://tmdb.test/3",
+      fetchJson: async (url) => {
+        if (url.includes("/search/multi?")) {
+          return {
+            results: [11, 12, 13].map((id) => ({ id, media_type: "tv", name: `剧${id}` })),
+          };
+        }
+        const id = Number(/\/tv\/(\d+)\?/.exec(url)?.[1]);
+        started.push(id);
+        await gate;
+        return { id, name: `剧${id}`, seasons: [] };
+      },
+    });
+    const pending = provider.searchMedia({ query: "并发" });
+    await vi.waitFor(() => expect(started).toHaveLength(3));
+    release();
+    expect((await pending).map((candidate) => candidate.tmdbId)).toEqual([11, 12, 13]);
+  });
+
   it("maps TMDB multi-search results into media search candidates and enriches TV seasons", async () => {
     const requests: string[] = [];
     const provider = new TmdbSearchProvider({

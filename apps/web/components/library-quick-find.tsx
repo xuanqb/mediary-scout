@@ -8,6 +8,7 @@ import { CalendarClock, CheckCircle2, Clapperboard, Clock3, LoaderCircle, Search
 // drags pg/postgres into the client bundle (see request-state.tsx).
 import { showHref } from "@media-track/workflow/scope";
 import type { InProgressTitle, LibraryWallEntry } from "../lib/title-hub";
+import { tmdbImageUrl } from "../lib/tmdb-image";
 
 /** Mirror of page.tsx's workspaceBasePath: "/" is the account's primary drive,
  *  "/w/<id>" a specific drive. Library links must route within the workspace. */
@@ -295,7 +296,7 @@ function InProgressCard({ title }: { title: InProgressTitle }) {
       <span className="wall-poster">
         {title.posterPath ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={`https://image.tmdb.org/t/p/w342${title.posterPath}`} alt="" loading="lazy" />
+          <img src={tmdbImageUrl(title.posterPath)} alt="" loading="lazy" />
         ) : (
           <span className="poster-fallback">{title.title.slice(0, 4)}</span>
         )}
@@ -329,9 +330,7 @@ function PosterCard({ entry, activeStorageId }: { entry: LibraryWallEntry; activ
                 { tone: "amber", icon: TriangleAlert, label: "有缺集" },
                 ...(entry.airing ? [{ tone: "indigo", icon: Clock3, label: "追更中" }] : []),
               ];
-  const posterSrc =
-    entry.posterUrl ??
-    (entry.posterPath ? `https://image.tmdb.org/t/p/w342${entry.posterPath}` : null);
+  const posterSrc = entry.posterUrl ?? (entry.posterPath ? tmdbImageUrl(entry.posterPath) : null);
 
   return (
     <Link className="wall-card" href={showHref(entry.tmdbId, "library", activeStorageId, entry.type)}>
