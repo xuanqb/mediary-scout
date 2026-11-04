@@ -118,3 +118,68 @@ describe("getInProgressTitles", () => {
   });
 });
 
+describe("getLibraryWall — Emby-covered gaps", () => {
+  let repo: InMemoryWorkflowRepository;
+  let hub: typeof import("./title-hub");
+
+  beforeEach(async () => {
+    repo = new InMemoryWorkflowRepository();
+    vi.resetModules();
+    vi.doMock("./workflow-runtime", async () => {
+      const actual = await vi.importActual<typeof import("./workflow-runtime")>("./workflow-runtime");
+      return { ...actual, getWorkflowRepository: () => repo, getActiveWorkspaceScope: async () => scope };
+    });
+    hub = await import("./title-hub");
+  }, 30_000);
+
+  async function seedSeason(t: MediaTitle, s: TrackedSeason, embyCodes: string[], obtainedCodes: string[]) {
+    await repo.saveWorkflowRunSnapshot({
+      ...scope,
+      title: t,
+      season: s,
+      workflowRun: {
+        id: `seed_${t.id}_s${s.seasonNumber}`,
+        kind: "type2_init",
+        status: "succeeded",
+        trackedSeasonId: s.id,
+        startedAt: NOW,
+        finishedAt: NOW,
+        auditEvents: [],
+      },
+      episodes: createEpisodeStates({
+        trackedSeasonId: s.id,
+        seasonNumber: s.seasonNumber,
+        totalEpisodes: s.totalEpisodes,
+        latestAiredEpisode: s.latestAiredEpisode,
+      }).map((episode) => ({
+        ...episode,
+        obtained: obtainedCodes.includes(episode.episodeCode),
+        availableInEmby: embyCodes.includes(episode.episodeCode),
+      })),
+      resourceSnapshots: [],
+      decisions: [],
+      transferAttempts: [],
+      notifications: [],
+    });
+  }
+
+  it("does not pin a title to 有缺集 when the only gap is already in Emby", async () => {
+    const covered = title(42, "EmbyCovered");
+    await seedSeason(covered, season(covered, 1), ["S01E02"], ["S01E01"]);
+
+    const entry = (await hub.getLibraryWall()).find((item) => item.tmdbId === 42)!;
+
+    expect(entry.state).toBe("complete");
+    // Still drive-only: Emby presence is not "已获取".
+    expect(entry.obtainedEpisodes).toBe(1);
+    expect(entry.totalAiredEpisodes).toBe(2);
+  });
+
+  it("still reports a real gap (not in Emby) as 有缺集", async () => {
+    const gap = title(43, "RealGap");
+    await seedSeason(gap, season(gap, 1), [], ["S01E01"]);
+
+    expect((await hub.getLibraryWall()).find((item) => item.tmdbId === 43)?.state).toBe("partial");
+  });
+});
+

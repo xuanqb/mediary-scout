@@ -602,6 +602,11 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
           : (await seriesTargetFor(tmdbId))?.title.posterPath ?? null;
     }
     let obtained = 0;
+    /** Drive-obtained + Emby-only. Completeness/有缺集 uses this, exactly like the
+     *  detail page's season badge (`obtainedCount + inEmbyCount`): an episode the
+     *  acquisition deliberately skipped because Emby already has it must not keep
+     *  the card pinned to 有缺集 forever. `obtained` stays drive-only for display. */
+    let covered = 0;
     let aired = 0;
     let total = 0;
     let anyActive = false;
@@ -621,18 +626,22 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       aired += seasonAired;
       total += primary.season.totalEpisodes;
       const obtainedCodes = new Set<string>();
+      const embyOnlyCodes = new Set<string>();
       for (const s of seasonStates) {
         for (const ep of s.episodes) {
           if (ep.obtained) obtainedCodes.add(ep.episodeCode);
+          else if (ep.availableInEmby) embyOnlyCodes.add(ep.episodeCode);
         }
       }
       const seasonObtained = obtainedCodes.size;
+      const seasonCovered = new Set([...obtainedCodes, ...embyOnlyCodes]).size;
       obtained += seasonObtained;
-      const allAiredObtained =
+      covered += seasonCovered;
+      const allAiredCovered =
         primary.season.totalEpisodes > 0 &&
         primary.season.latestAiredEpisode >= primary.season.totalEpisodes &&
-        seasonObtained >= seasonAired;
-      if (!allAiredObtained && seasonStates.some((s) => s.season.status === "active")) {
+        seasonCovered >= seasonAired;
+      if (!allAiredCovered && seasonStates.some((s) => s.season.status === "active")) {
         anyActive = true;
       }
     }
@@ -651,7 +660,7 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       totalAiredEpisodes: aired,
       totalEpisodes: total,
       releaseDate: title.releaseDate ?? null,
-      state: libraryWallState({ obtained, aired, anyActive, unreleased }),
+      state: libraryWallState({ obtained: covered, aired, anyActive, unreleased }),
       airing: libraryWallAiring({ anyActive, unreleased }),
     });
   }
