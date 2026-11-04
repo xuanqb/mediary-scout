@@ -96,6 +96,49 @@ describe("provisionCategoryDirs (find-or-create, idempotent)", () => {
     expect(cids.moviesCid).toBe("new_电影");
   });
 
+  it("honors a multi-segment root path, creating each level then the shelves under the deepest", async () => {
+    const created: string[] = [];
+    const fakeStorage = {
+      async listChildDirs() {
+        return [] as Array<{ name: string; id: string }>;
+      },
+      async createDirectory({ name, parentId }: { name: string; parentId: string }) {
+        created.push(`${name}@${parentId}`);
+        return `new_${name}`;
+      },
+    };
+    const cids = await provisionCategoryDirs({
+      storage: fakeStorage,
+      baseParentId: "0",
+      rootName: " 影音 / 影视 ",
+    });
+    expect(created).toEqual([
+      "影音@0",
+      "影视@new_影音",
+      "电影@new_影视",
+      "电视剧@new_影视",
+      "综艺@new_影视",
+      "动漫@new_影视",
+    ]);
+    expect(cids.rootCid).toBe("new_影视");
+  });
+
+  it("a root path of only separators still resolves to a real container folder", async () => {
+    const created: string[] = [];
+    const fakeStorage = {
+      async listChildDirs() {
+        return [] as Array<{ name: string; id: string }>;
+      },
+      async createDirectory({ name, parentId }: { name: string; parentId: string }) {
+        created.push(`${name}@${parentId}`);
+        return `new_${name}`;
+      },
+    };
+    const cids = await provisionCategoryDirs({ storage: fakeStorage, baseParentId: "0", rootName: " / " });
+    expect(created[0]).toBe("影视@0");
+    expect(cids.rootCid).not.toBe("0");
+  });
+
   it("treats empty / whitespace names as unset → falls back to defaults (root never collapses to the account root)", async () => {
     const created: string[] = [];
     const fakeStorage = {

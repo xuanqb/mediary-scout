@@ -901,12 +901,13 @@ async function AutomationWebhookSection() {
   const config = { ...stored, secret: "" };
   const deliveries = await readAutomationDeliveries(accountId);
 
-  // Test payload's path: the first connected drive's real layout, so the button
-  // exercises the same mount-prefix + shelf + title-folder shape as a real run.
+  // Test payload's path: the first connected Quark drive's real layout, so the
+  // button exercises the same mount-prefix + shelf + title-folder shape as a real
+  // run. 115 is mounted directly in Emby and never triggers SmartStrm.
   const year = new Date().getFullYear();
-  let sampleStoragePath = `/115/影视/电影/示例影片 (${year}) {tmdb-0}`;
+  let sampleStoragePath = `/quark/影视/电影/示例影片 (${year}) {tmdb-0}`;
   const drives = await getAccountConnectedStorages();
-  const firstDrive = drives[0];
+  const firstDrive = drives.find((drive) => drive.provider === "quark");
   if (firstDrive) {
     try {
       sampleStoragePath =
@@ -932,7 +933,7 @@ async function AutomationWebhookSection() {
             自动化 Webhook（SmartStrm）
           </h2>
           <p className="panel-note">
-            每次落盘后按目录触发 SmartStrm 的 a_task，同一目录合并为一次扫描
+            每次落盘后按目录触发 SmartStrm 的 a_task，同一目录合并为一次扫描；仅夸克盘触发，115 由 Emby 直接挂载、无需生成 .strm
           </p>
         </div>
       </div>

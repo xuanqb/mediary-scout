@@ -2516,26 +2516,39 @@ function withLibraryDirNames(payload: unknown, names: LibraryDirNames): unknown 
 
 const LIBRARY_DIR_NAME_MAX = 64;
 
-/** Trim user-supplied names and reject path separators — each value is a single
- *  directory segment under the drive's media root. Blanks fall back to defaults. */
-function normalizeLibraryDirNames(input: LibraryDirNames): LibraryDirNames {
+/** Trim user-supplied names and reject path separators — each category value is
+ *  a single directory segment under the drive's media root. The root alone may
+ *  be a relative multi-segment path (`影音/影视`): each segment becomes a nested
+ *  folder. Blanks fall back to defaults. */
+export function normalizeLibraryDirNames(input: LibraryDirNames): LibraryDirNames {
   const names: LibraryDirNames = {};
-  for (const key of [
-    "rootName",
-    "moviesName",
-    "tvName",
-    "varietyName",
-    "animeName",
-  ] as const) {
+  for (const key of ["moviesName", "tvName", "varietyName", "animeName"] as const) {
     const value = input[key]?.trim();
     if (!value) continue;
     if (/[\\/]/.test(value)) {
-      throw new Error("目录名不能包含 / 或 \\，请填写单层目录名。");
+      throw new Error("分类目录名不能包含 / 或 \\，请填写单层目录名。");
     }
     if (value.length > LIBRARY_DIR_NAME_MAX) {
       throw new Error(`目录名不能超过 ${LIBRARY_DIR_NAME_MAX} 个字符。`);
     }
     names[key] = value;
+  }
+  const root = input.rootName?.trim();
+  if (root) {
+    if (root.includes("\\")) {
+      throw new Error("根目录路径不能包含 \\，请用 / 分隔层级。");
+    }
+    const segments = root
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    if (segments.some((segment) => segment === "." || segment === "..")) {
+      throw new Error("根目录路径不能包含 . 或 ..。");
+    }
+    if (segments.some((segment) => segment.length > LIBRARY_DIR_NAME_MAX)) {
+      throw new Error(`根目录每一级不能超过 ${LIBRARY_DIR_NAME_MAX} 个字符。`);
+    }
+    if (segments.length > 0) names.rootName = segments.join("/");
   }
   // The mount prefix is a SmartStrm-side path, not a drive folder: allow slashes,
   // strip trailing ones, and ensure it is absolute.

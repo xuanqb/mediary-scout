@@ -149,6 +149,7 @@ export function AutomationWebhookForm({
         <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} />
         落盘后自动触发 SmartStrm 扫描
       </label>
+      <p className="push-help">仅夸克盘触发；115 由 Emby 直接挂载，无需生成 .strm。</p>
       <div className="push-field">
         <label className="push-label">Webhook 地址（SmartStrm → /webhook/&lt;token&gt;）</label>
         <input

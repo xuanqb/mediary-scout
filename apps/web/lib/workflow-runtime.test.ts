@@ -4,6 +4,7 @@ import {
   acquireLlmPreflightError,
   resolveAgentModelConfig,
   customDirNamesFromEnv,
+  normalizeLibraryDirNames,
   isCookieSecure,
   getLlmConfig,
   getPanSouBaseUrl,
@@ -698,6 +699,25 @@ describe("customDirNamesFromEnv (brand-agnostic 自定义媒体库目录名)", (
     ).toEqual({ tvName: "剧集" });
   });
 })
+
+describe("normalizeLibraryDirNames（每盘目录名）", () => {
+  it("允许根目录多级，并清掉多余分隔符", () => {
+    expect(normalizeLibraryDirNames({ rootName: " /影音// 影视/ ", moviesName: "电影" })).toEqual({
+      rootName: "影音/影视",
+      moviesName: "电影",
+    });
+  });
+
+  it("分类目录仍是单层；根目录拒绝 ..、. 与反斜杠", () => {
+    expect(() => normalizeLibraryDirNames({ moviesName: "电影/4K" })).toThrow("单层");
+    expect(() => normalizeLibraryDirNames({ rootName: "影音/../电影" })).toThrow("不能包含 . 或 ..");
+    expect(() => normalizeLibraryDirNames({ rootName: "影音\\影视" })).toThrow("不能包含 \\");
+  });
+
+  it("只有分隔符的根目录回落默认（不写账号根）", () => {
+    expect(normalizeLibraryDirNames({ rootName: " / " })).toEqual({});
+  });
+});
 
 describe("getPatrolConcurrency", () => {
   const repo = (value: string | null) => ({ getSetting: async () => value });

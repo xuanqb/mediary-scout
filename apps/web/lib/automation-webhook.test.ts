@@ -15,6 +15,12 @@ const { repo, resolveLandedStoragePath } = vi.hoisted(() => {
       async listAccounts() {
         return [{ id: "acct" }];
       },
+      async listConnectedStorages() {
+        return [
+          { id: "drive-1", provider: "quark" },
+          { id: "drive-115", provider: "pan115" },
+        ];
+      },
     },
     resolveLandedStoragePath: vi.fn(async (..._args: unknown[]) => "/115/影视/电影/示例影片 (2026) {tmdb-1}"),
   };
@@ -52,6 +58,7 @@ function readPending() {
     dueAt: string;
     firstAt: string;
     attempts: number;
+    storageId: string;
   }>;
 }
 
@@ -186,6 +193,33 @@ describe("enqueueAutomationForLandings", () => {
       ],
     });
     expect(repo.settings.get(`acct:${AUTOMATION_PENDING_SETTING_KEY}`)).toBeUndefined();
+  });
+
+  it("queues Quark landings but never 115 (mounted directly in Emby)", async () => {
+    saveConfig();
+    resolveLandedStoragePath.mockImplementation(async (args: unknown) => {
+      const { storageId } = args as { storageId: string };
+      return storageId === "drive-115" ? "/115/影视/电影/示例影片 (2026) {tmdb-1}" : "/quark/影视/电影/示例影片 (2026) {tmdb-1}";
+    });
+    await enqueueAutomationForLandings({
+      accountId: "acct",
+      entries: [{ connectedStorageId: "drive-115", report }],
+    });
+    expect(repo.settings.get(`acct:${AUTOMATION_PENDING_SETTING_KEY}`)).toBeUndefined();
+
+    await enqueueAutomationForLandings({
+      accountId: "acct",
+      entries: [
+        {
+          connectedStorageId: null,
+          report: { ...report, landedStorageIds: ["drive-115", "drive-1"] },
+        },
+      ],
+    });
+    const pending = readPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]!.storageId).toBe("drive-1");
+    expect(pending[0]!.storagePath).toBe("/quark/影视/电影/示例影片 (2026) {tmdb-1}");
   });
 });
 

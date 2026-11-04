@@ -8,7 +8,7 @@ import { saveDriveLibraryDirsAction } from "../app/actions";
 import { runAction } from "../lib/run-action";
 
 const FIELDS: Array<{ key: keyof LibraryDirNames; label: string; fallback: string }> = [
-  { key: "rootName", label: "媒体库根目录", fallback: "影视" },
+  { key: "rootName", label: "媒体库根目录（可多级）", fallback: "影视 或 影音/影视" },
   { key: "moviesName", label: "电影", fallback: "电影" },
   { key: "tvName", label: "电视剧", fallback: "电视剧" },
   { key: "varietyName", label: "综艺", fallback: "综艺" },
@@ -70,7 +70,7 @@ export function DriveLibraryDirsForm({
               onChange={(event) =>
                 setValues((previous) => ({ ...previous, [field.key]: event.target.value }))
               }
-              aria-label={`${field.label}目录名`}
+              aria-label={field.label}
             />
           </div>
         ))}
@@ -85,7 +85,8 @@ export function DriveLibraryDirsForm({
           </button>
         </div>
         <p className="panel-note">
-          路径形如「根目录/电影」；留空使用默认值。已入库的旧剧集不会被移动。
+          路径形如「根目录/分类」；根目录可填多级，如「影音/影视」，程序会逐级创建；
+          分类目录仍是单层。留空使用默认值。已入库的旧剧集不会被移动。
           挂载前缀是这块盘在 SmartStrm 里的挂载点（如 /115），只用于拼自动化
           storage_path；留空按品牌默认值（/115、/quark）。
         </p>

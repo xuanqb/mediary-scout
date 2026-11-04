@@ -118,9 +118,12 @@ export interface ProvisionedCids {
  * second run finds every dir and creates nothing).
  *
  * Directory names are customisable (rootName / moviesName / tvName / varietyName /
- * animeName). A blank or whitespace-only name falls back to its default — in
- * particular the root ALWAYS resolves to a real container folder, never to the
- * account root, so the drive's write scope can never widen to the whole account.
+ * animeName). `rootName` may be a relative multi-segment path such as
+ * `影音/影视`: each segment is find-or-created in order and the four category
+ * folders live under the deepest one. A blank or whitespace-only name falls back
+ * to its default — in particular the root ALWAYS resolves to a real container
+ * folder, never to the account root, so the drive's write scope can never widen
+ * to the whole account.
  */
 export async function provisionCategoryDirs(input: {
   storage: DirProvisionStorage;
@@ -132,7 +135,13 @@ export async function provisionCategoryDirs(input: {
   animeName?: string;
 }): Promise<ProvisionedCids> {
   const named = (value: string | undefined, fallback: string) => value?.trim() || fallback;
-  const rootName = named(input.rootName, "影视");
+  const rootSegments = named(input.rootName, "影视")
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+  // A path like "/" normalizes to zero segments — still never collapse the root
+  // onto the account root.
+  if (rootSegments.length === 0) rootSegments.push("影视");
   const moviesName = named(input.moviesName, "电影");
   const tvName = named(input.tvName, "电视剧");
   const varietyName = named(input.varietyName, "综艺");
@@ -141,7 +150,10 @@ export async function provisionCategoryDirs(input: {
     const existing = (await input.storage.listChildDirs(parentId)).find((dir) => dir.name === name);
     return existing ? existing.id : input.storage.createDirectory({ name, parentId });
   };
-  const rootCid = await findOrCreate(rootName, input.baseParentId);
+  let rootCid = input.baseParentId;
+  for (const segment of rootSegments) {
+    rootCid = await findOrCreate(segment, rootCid);
+  }
   const moviesCid = await findOrCreate(moviesName, rootCid);
   const tvCid = await findOrCreate(tvName, rootCid);
   const varietyCid = await findOrCreate(varietyName, rootCid);

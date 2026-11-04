@@ -237,6 +237,10 @@ export async function enqueueAutomationForLandings(input: {
   if (!config.enabled || !config.url) return 0;
   return withMutation(async () => {
     const pending = await readJsonArray<PendingTask>(input.accountId, AUTOMATION_PENDING_SETTING_KEY);
+    // SmartStrm only feeds drives that Emby cannot mount directly. 115 is mounted
+    // as-is, so refreshing .strm there would just rescan the library for nothing.
+    const drives = await getWorkflowRepository().listConnectedStorages(input.accountId);
+    const providerByStorageId = new Map(drives.map((drive) => [drive.id, drive.provider]));
     const now = Date.now();
     let queued = 0;
     for (const entry of input.entries) {
@@ -258,6 +262,7 @@ export async function enqueueAutomationForLandings(input: {
             ? [entry.connectedStorageId]
             : [];
       for (const storageId of new Set(storageIds)) {
+        if (providerByStorageId.get(storageId) === "pan115") continue;
         const storagePath = await resolveLandedStoragePath({
           accountId: input.accountId,
           storageId,
