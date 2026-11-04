@@ -5,7 +5,10 @@ import { createContext, useContext, useState, type ReactNode } from "react";
 interface AcquisitionLockState {
   /** Scope currently being acquired (e.g. "remaining" or "season-2"), or null. */
   acquiring: string | null;
-  lock: (scope: string) => void;
+  /** Pass null when the action settles: the lock is a double-click guard, not a
+   *  run tracker — server truth (`titleAcquiring`) disables the siblings while
+   *  the queued run is actually in flight. */
+  lock: (scope: string | null) => void;
 }
 
 const AcquisitionLockContext = createContext<AcquisitionLockState | null>(null);

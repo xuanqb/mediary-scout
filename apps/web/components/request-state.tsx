@@ -17,17 +17,17 @@ export function isLockedResult(result: RequestTrackingActionResult | null): bool
 }
 
 /**
- * The acquire-time LLM pre-check (issue #52) returned the "未配置 AI 模型" message
- * and enqueued NOTHING — so the control must stay clickable (NOT locked) and show
- * the guidance inline. Shared so the acquire components surface it consistently
- * instead of only as a hover title. Renders nothing for any other status.
+ * Explains why nothing was queued. The acquire-time LLM pre-check (issue #52)
+ * returns `llm_not_configured`; a rejected/failed action returns `unsupported`.
+ * Both must stay visible inline — otherwise the button simply resets and the
+ * user has no idea whether anything happened.
  */
 export function AcquireResultNotice({
   result,
 }: {
   result: RequestTrackingActionResult | null;
 }) {
-  if (result?.status !== "llm_not_configured") {
+  if (result?.status !== "llm_not_configured" && result?.status !== "unsupported") {
     return null;
   }
   return <p className="request-result">{result.message}</p>;
