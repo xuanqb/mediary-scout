@@ -2,7 +2,7 @@ const TMDB_ORIGIN = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_ORIGIN = "https://image.tmdb.org";
 
 // Poster image proxy: image.tmdb.org is GFW-blocked for mainland visitors, so
-// the landing site loads posters through the worker. Tight shape allowlist
+// the app loads posters through the worker. Tight shape allowlist
 // (two sizes, hash-like filename) keeps this from being a general image proxy.
 const IMG_PATH_RE = /^t\/p\/(w342|w500)\/[A-Za-z0-9_]+\.(jpg|png)$/;
 
@@ -89,37 +89,6 @@ function cacheKeyFor(request: Request): string {
   );
   const qs = new URLSearchParams(entries).toString();
   return qs ? `${path}?${qs}` : path;
-}
-
-const TRENDING_TTL_SECONDS = 25 * 60 * 60; // > 24h 刷新间隔,断刷时兜底一小时
-
-/** Last-calendar-year floor (rolls yearly): the anime feed shows RECENT seasons,
- *  not TMDB's all-time-popularity classics (全职猎人1999/死神2004…). */
-export function animeFirstAirDateFloor(now: Date = new Date()): string {
-  return `${now.getUTCFullYear() - 1}-01-01`;
-}
-
-/** The three discovery feeds this proxy warm-caches, aligned to 电影/剧集/动漫.
- *  Movie/TV are TMDB weekly trending. Anime has no "trending" endpoint, so it's
- *  discover/tv (日语动画) with a ROLLING first_air_date.gte (recent seasons only —
- *  bare popularity.desc surfaces decade-old classics) + vote_count.gte=50 +
- *  include_adult=false (mainstream, drops 里番/borderline). The Cron refreshes
- *  these into KV; clients read the same URLs. */
-export function getTrendingFeeds(now: Date = new Date()): string[] {
-  const floor = animeFirstAirDateFloor(now);
-  return [
-    "trending/movie/week?language=zh-CN",
-    "trending/tv/week?language=zh-CN",
-    `discover/tv?first_air_date.gte=${floor}&include_adult=false&language=zh-CN&sort_by=popularity.desc&vote_count.gte=50&with_genres=16&with_original_language=ja`,
-  ];
-}
-
-/** Is this request one of the daily-cadence feeds? A reactive MISS on one must
- *  cache with the daily TTL (else a feed that fell out of KV re-hits TMDB every
- *  hour — ttlForPath gives non-movie paths 1h). Feed-specific: an ordinary
- *  discover/tv call keeps its short TTL. Computed per-call (feeds roll by date). */
-function isTrendingFeedRequest(key: string, now: Date = new Date()): boolean {
-  return getTrendingFeeds(now).some((feed) => cacheKeyFor(new Request(`https://proxy/${feed}`)) === key);
 }
 
 export interface KvLike {
@@ -257,46 +226,8 @@ export async function handleTmdbProxy(deps: HandleTmdbProxyDeps): Promise<Respon
     }
     return new Response(body, { status: originResponse.status, headers: jsonHeaders("MISS", request) });
   }
-  const ttl = isTrendingFeedRequest(key) ? TRENDING_TTL_SECONDS : ttlForPath(path);
+  const ttl = ttlForPath(path);
   await deps.kv.put(key, envelopeFor(body, ttl, now()), { expirationTtl: ttl + STALE_TAIL_SECONDS });
   return new Response(body, { status: 200, headers: jsonHeaders("MISS", request) });
 }
 
-export interface RunScheduledRefreshDeps {
-  kv: KvLike;
-  token: string;
-  originFetch?: typeof fetch;
-  /** Bound per feed fetch — one hung feed must not eat the cron invocation. */
-  upstreamTimeoutMs?: number;
-  now?: () => number;
-}
-
-/** Daily Cron: pre-warm each feed's KV entry so NO user open triggers a TMDB
- *  request. Computes the key via the proxy's own cacheKeyFor (through a synthetic
- *  Request), so it is byte-identical to what handleTmdbProxy derives for the same
- *  feed. A feed whose origin fetch fails or throws is skipped — its prior KV value
- *  (if any) lives on under its TTL, and one bad feed never aborts the others. */
-export async function runScheduledRefresh(deps: RunScheduledRefreshDeps): Promise<void> {
-  const originFetch = deps.originFetch ?? fetch;
-  const timeoutMs = deps.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS;
-  const now = deps.now ?? Date.now;
-  for (const feed of getTrendingFeeds()) {
-    const key = cacheKeyFor(new Request(`https://proxy/${feed}`));
-    try {
-      const originResponse = await originFetch(`${TMDB_ORIGIN}/${key}`, {
-        method: "GET",
-        headers: { Authorization: `Bearer ${deps.token}`, "Content-Type": "application/json;charset=utf-8" },
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!originResponse.ok) {
-        continue;
-      }
-      const body = await originResponse.text();
-      await deps.kv.put(key, envelopeFor(body, TRENDING_TTL_SECONDS, now()), {
-        expirationTtl: TRENDING_TTL_SECONDS + STALE_TAIL_SECONDS,
-      });
-    } catch {
-      // network hiccup on one feed must not abort the rest
-    }
-  }
-}

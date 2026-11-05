@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { getTrendingFeeds, handleTmdbProxy, runScheduledRefresh, type KvLike } from "./handler";
+import { handleTmdbProxy, type KvLike } from "./handler";
 
 function fakeKv(initial: Record<string, string> = {}): KvLike & { puts: Array<{ key: string; ttl: number | undefined }> } {
   const store = new Map(Object.entries(initial));
@@ -294,21 +294,7 @@ describe("handleTmdbProxy — upstream flap absorption (timeout + stale fallback
   });
 });
 
-describe("trending discovery", () => {
-  it("anime feed = recent (first_air_date rolls to <year-1>-01-01) + vote_count.gte=50, matching the frontend", () => {
-    const now = new Date("2026-07-04T00:00:00Z");
-    const feeds = getTrendingFeeds(now);
-    expect(feeds[0]).toBe("trending/movie/week?language=zh-CN");
-    expect(feeds[1]).toBe("trending/tv/week?language=zh-CN");
-    const animeParams = new URL(`https://x/${feeds[2]}`).searchParams;
-    expect(animeParams.get("first_air_date.gte")).toBe("2025-01-01");
-    expect(animeParams.get("vote_count.gte")).toBe("50");
-    expect(animeParams.get("include_adult")).toBe("false");
-    expect(animeParams.get("with_original_language")).toBe("ja");
-    expect(animeParams.get("with_genres")).toBe("16");
-    expect(animeParams.get("sort_by")).toBe("popularity.desc");
-  });
-
+describe("handleTmdbProxy — trending path", () => {
   it("allows the trending/ prefix (was 404)", async () => {
     const res = await handleTmdbProxy({
       request: new Request("https://w.example/trending/movie/week?language=zh-CN"),
@@ -317,77 +303,6 @@ describe("trending discovery", () => {
       originFetch: async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
     });
     expect(res.status).toBe(200);
-  });
-
-  it("runScheduledRefresh writes every feed to KV under its cacheKey with a 25h TTL, and the frontend then reads a HIT", async () => {
-    const kv = fakeKv();
-    await runScheduledRefresh({
-      kv,
-      token: "k",
-      originFetch: async () => new Response(JSON.stringify({ results: [{ id: 1 }] }), { status: 200 }),
-    });
-    expect(kv.puts).toHaveLength(getTrendingFeeds().length);
-    for (const put of kv.puts) {
-      expect(put.ttl).toBe(25 * 60 * 60 + 14 * 24 * 60 * 60);
-    }
-    expect(kv.puts[0]!.key.startsWith("trending/movie/week")).toBe(true);
-
-    // A subsequent frontend request for the same feed must serve the warmed KV
-    // entry WITHOUT hitting origin — proving the Cron key === proxy key.
-    const hit = await handleTmdbProxy({
-      request: new Request(`https://w.example/${getTrendingFeeds()[0]}`),
-      kv,
-      token: "k",
-      originFetch: async () => new Response("SHOULD_NOT_FETCH", { status: 500 }),
-    });
-    expect(hit.status).toBe(200);
-    expect(hit.headers.get("X-Cache")).toBe("HIT");
-  });
-
-  it("a reactive MISS on a trending feed caches with the 25h TTL, not the 1h short TTL", async () => {
-    // Cold KV (cron delayed / right after deploy): the feed is fetched reactively.
-    // It must still get the daily-cadence TTL, else the proxy re-hits TMDB hourly.
-    const kv = fakeKv();
-    await handleTmdbProxy({
-      request: new Request(`https://w.example/${getTrendingFeeds()[1]}`), // trending/tv/week
-      kv,
-      token: "k",
-      originFetch: async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
-    });
-    expect(kv.puts[0]?.ttl).toBe(25 * 60 * 60 + 14 * 24 * 60 * 60);
-
-    // The DYNAMIC anime feed (first_air_date.gte rolls yearly) must get the same
-    // daily TTL on a reactive MISS — isTrendingFeedRequest recomputes the feeds,
-    // so the rolling date must still be recognized as a trending feed.
-    const animeKv = fakeKv();
-    await handleTmdbProxy({
-      request: new Request(`https://w.example/${getTrendingFeeds()[2]}`), // discover/tv anime
-      kv: animeKv,
-      token: "k",
-      originFetch: async () => new Response(JSON.stringify({ results: [] }), { status: 200 }),
-    });
-    expect(animeKv.puts[0]?.ttl).toBe(25 * 60 * 60 + 14 * 24 * 60 * 60);
-
-    // A non-feed discover/tv call keeps its ordinary short TTL (feed-specific, not
-    // a blanket discover override).
-    const other = fakeKv();
-    await handleTmdbProxy({
-      request: new Request("https://w.example/discover/tv?with_genres=99"),
-      kv: other,
-      token: "k",
-      originFetch: async () => new Response("{}", { status: 200 }),
-    });
-    expect(other.puts[0]?.ttl).toBe(60 * 60 + 14 * 24 * 60 * 60);
-  });
-
-  it("runScheduledRefresh skips a feed whose origin fetch fails (never aborts the rest)", async () => {
-    const kv = fakeKv();
-    await runScheduledRefresh({
-      kv,
-      token: "k",
-      originFetch: async () => new Response("nope", { status: 500 }),
-    });
-    expect(kv.puts).toHaveLength(0);
   });
 });
 
