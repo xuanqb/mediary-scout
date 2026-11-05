@@ -18,7 +18,6 @@ export interface EmbyConfig {
 interface EmbyItem {
   Id: string;
   Name?: string;
-  ProviderIds?: Record<string, string | undefined>;
   ParentIndexNumber?: number;
   IndexNumber?: number;
 }
@@ -38,10 +37,17 @@ async function embyGet<T>(config: EmbyConfig, path: string): Promise<T | null> {
   return (await response.json()) as T;
 }
 
-function tmdbOf(item: EmbyItem): number | null {
-  const raw = item.ProviderIds?.Tmdb;
-  const value = Number(raw);
-  return Number.isInteger(value) && value > 0 ? value : null;
+/** Server-side lookup: Emby resolves the provider id itself and returns at most
+ *  one item, so a huge library is never dumped into Node memory. */
+async function findIdByTmdb(
+  config: EmbyConfig,
+  input: { libraryId: string; itemType: "Series" | "Movie"; tmdbId: number },
+): Promise<string | null> {
+  const data = await embyGet<{ Items?: EmbyItem[] }>(
+    config,
+    `/Items?ParentId=${encodeURIComponent(input.libraryId)}&Recursive=true&IncludeItemTypes=${input.itemType}&AnyProviderIdEquals=Tmdb.${input.tmdbId}&Limit=1`,
+  );
+  return data?.Items?.[0]?.Id ?? null;
 }
 
 /** Libraries by id, so the configured name → library id lookup is one call. */
@@ -84,15 +90,15 @@ export async function episodesInEmby(
   try {
     const libraryId = await findLibraryId(config, config.libraryNames[input.category]);
     if (!libraryId) return [];
-    const items = await embyGet<{ Items?: EmbyItem[] }>(
-      config,
-      `/Items?ParentId=${encodeURIComponent(libraryId)}&Recursive=true&IncludeItemTypes=Series&Fields=ProviderIds&Limit=10000`,
-    );
-    const series = items?.Items?.find((item) => tmdbOf(item) === input.tmdbId);
-    if (!series) return [];
+    const seriesId = await findIdByTmdb(config, {
+      libraryId,
+      itemType: "Series",
+      tmdbId: input.tmdbId,
+    });
+    if (!seriesId) return [];
     const episodes = await embyGet<{ Items?: EmbyItem[] }>(
       config,
-      `/Items?ParentId=${encodeURIComponent(series.Id)}&Recursive=true&IncludeItemTypes=Episode&Fields=IndexNumber,ParentIndexNumber&Limit=10000`,
+      `/Items?ParentId=${encodeURIComponent(seriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=IndexNumber,ParentIndexNumber&Limit=10000`,
     );
     const codes: string[] = [];
     for (const episode of episodes?.Items ?? []) {
@@ -118,11 +124,12 @@ export async function movieInEmby(
   try {
     const libraryId = await findLibraryId(config, config.libraryNames[input.category ?? "movies"]);
     if (!libraryId) return false;
-    const items = await embyGet<{ Items?: EmbyItem[] }>(
-      config,
-      `/Items?ParentId=${encodeURIComponent(libraryId)}&Recursive=true&IncludeItemTypes=Movie&Fields=ProviderIds&Limit=10000`,
-    );
-    return (items?.Items ?? []).some((item) => tmdbOf(item) === input.tmdbId);
+    const movieId = await findIdByTmdb(config, {
+      libraryId,
+      itemType: "Movie",
+      tmdbId: input.tmdbId,
+    });
+    return movieId !== null;
   } catch (error) {
     console.warn(
       `[emby] movie lookup failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,

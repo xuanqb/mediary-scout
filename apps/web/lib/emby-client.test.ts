@@ -64,12 +64,12 @@ describe("probeEmby", () => {
 });
 
 describe("episodesInEmby", () => {
-  it("finds the library by configured name, matches the series by TMDB id, returns SxxExx", async () => {
-    stubFetch([
+  it("looks the series up server-side by TMDB id, returns SxxExx", async () => {
+    const calls = stubFetch([
       ["/Library/MediaFolders", { Items: [{ Id: "lib-tv", Name: "电视剧" }] }],
       [
-        "IncludeItemTypes=Series",
-        { Items: [{ Id: "series-1", ProviderIds: { Tmdb: "1399" } }] },
+        "AnyProviderIdEquals=Tmdb.1399",
+        { Items: [{ Id: "series-1" }] },
       ],
       [
         "IncludeItemTypes=Episode",
@@ -84,6 +84,9 @@ describe("episodesInEmby", () => {
     ]);
     const codes = await episodesInEmby(config, { tmdbId: 1399, category: "tv" });
     expect(codes).toEqual(["S01E02", "S01E10"]);
+    const seriesCall = calls.find((call) => call.url.includes("IncludeItemTypes=Series"));
+    expect(seriesCall?.url).toContain("AnyProviderIdEquals=Tmdb.1399");
+    expect(seriesCall?.url).toContain("ParentId=lib-tv");
   });
 
   it("returns [] when the configured library is missing", async () => {
@@ -94,7 +97,7 @@ describe("episodesInEmby", () => {
   it("returns [] when the series is not in Emby", async () => {
     stubFetch([
       ["/Library/MediaFolders", { Items: [{ Id: "lib-tv", Name: "电视剧" }] }],
-      ["IncludeItemTypes=Series", { Items: [{ Id: "series-1", ProviderIds: { Tmdb: "1" } }] }],
+      ["AnyProviderIdEquals=Tmdb.1399", { Items: [] }],
     ]);
     expect(await episodesInEmby(config, { tmdbId: 1399, category: "tv" })).toEqual([]);
   });
@@ -117,7 +120,8 @@ describe("movieInEmby", () => {
   it("matches a movie by TMDB id in the movies library", async () => {
     stubFetch([
       ["/Library/MediaFolders", { Items: [{ Id: "lib-movies", Name: "电影" }] }],
-      ["IncludeItemTypes=Movie", { Items: [{ Id: "m1", ProviderIds: { Tmdb: "603" } }] }],
+      ["AnyProviderIdEquals=Tmdb.603", { Items: [{ Id: "m1" }] }],
+      ["AnyProviderIdEquals=Tmdb.604", { Items: [] }],
     ]);
     expect(await movieInEmby(config, { tmdbId: 603 })).toBe(true);
     expect(await movieInEmby(config, { tmdbId: 604 })).toBe(false);
