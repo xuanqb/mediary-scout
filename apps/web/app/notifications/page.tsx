@@ -362,7 +362,11 @@ function ChipGroup({ label, codes, variant }: { label: string; codes: string[]; 
  */
 function RoutineCard({ items, time }: { items: NotificationEvent[]; time: string }) {
   return (
-    <article className="feed-card routine-card">
+    // data-created-at is load-bearing: NotificationsSeenMarker advances the
+    // browser's seen watermark from these attributes. Without it, a routine card
+    // (the newest notification on most days) could never be marked seen and the
+    // nav red dot stayed forever.
+    <article className="feed-card routine-card" data-created-at={time}>
       <div className="feed-card-head">
         <span className="feed-icon tone-muted">
           <CalendarClock size={15} aria-hidden />
