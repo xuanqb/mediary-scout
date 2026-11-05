@@ -20,11 +20,29 @@ import {
   getAccountScopedSettings,
   getCurrentAccountId,
   getWorkflowRepository,
+  isMultiUserEnabled,
   PANSOU_BASE_URL_SETTING_KEY,
   PANSOU_HEALTH_SETTING_KEY,
   resolveAgentModelConfig,
   UNAUTHENTICATED_ACCOUNT_ID,
 } from "./workflow-runtime";
+
+/** Single-user: the sentinel an anonymous tunnel visitor resolves to is never the
+ *  owner; otherwise single-user is the implicit owner, multi-user reads is_owner. */
+async function resolveIsOwner(
+  repository: WorkflowRepository,
+  accountId: string,
+): Promise<boolean> {
+  if (accountId === UNAUTHENTICATED_ACCOUNT_ID) return false;
+  if (!isMultiUserEnabled()) return true;
+  const account = await repository.getAccountById(accountId);
+  return account?.isOwner ?? false;
+}
+
+export async function resolveCurrentIsOwner(): Promise<boolean> {
+  const repository = getWorkflowRepository();
+  return resolveIsOwner(repository, await getCurrentAccountId());
+}
 
 function brandLabel(provider: string): string {
   try {
