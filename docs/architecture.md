@@ -12,7 +12,6 @@ flowchart LR
     AG -->|读回| DR
     EMBY["Emby"] -->|已有集 / 电影| AG
     AG -->|落盘后扫描| EMBY
-    W -->|按目录去抖| STRM["SmartStrm Webhook"]
     AG -->|验证并标记| Q
     Q -->|实时| UI
     CRON["定时巡检"] -->|只补缺集| Q

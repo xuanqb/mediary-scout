@@ -53,7 +53,7 @@ mediary-scout/
 │   │   ├── repository.ts    # 持久化仓库接口 + InMemory实现
 │   │   ├── worker.ts        # 队列 Worker (type2/3/series/movie)
 │   │   ├── runner-v2.ts     # V2 运行器 (持久化包装)
-│   │   ├── notify.ts        # 多渠道推送 (Bark/Server酱/企微/Webhook)
+│   │   ├── notify.ts        # 企业微信群机器人推送（纯文本）
 │   │   ├── postgres.ts      # PG 数据库适配器
 │   │   ├── storage-brands.ts# 网盘品牌注册表
 │   │   ├── pan115-*.ts      # 115网盘客户端/登录/存储
@@ -508,14 +508,11 @@ Agent 自主决策:
 
 ## 十一、推送通知渠道
 
-| 渠道 | 适配器 |
+| 渠道 | 发送方式 |
 |---|---|
-| Bark (iOS APNs) | `createBarkChannel` |
-| Server酱 Turbo (微信) | `createServerChanChannel` |
-| 企业微信群机器人 | `createWeComChannel` |
-| 自定义 Webhook | `createWebhookChannel` |
+| 企业微信群机器人 | `sendWeComText`（仅 `msgtype: "text"`） |
 
-通知分 L1 (简单文本) 和 L2 (富文本: poster + Markdown + tap-through link)。
+站内通知中心是数据源；对外只投递纯文本，不使用图文卡片或 markdown。单条超过企微 2048 字节上限时按行拆成多条，每条带 `[i/n]` 前缀。
 
 ---
 
@@ -1173,44 +1170,26 @@ INSERT INTO resource_snapshots (...) VALUES (...);
 
 #### 12.5.3 推送通知
 
-`workflow-runtime.ts:1004` → `notify.ts:320`:
+`workflow-runtime.ts` → `notify.ts`:
 
 ```typescript
-// 构建富文本推送消息 (notify.ts:64)
-const message = buildNotifyMessage({
-  report: {
-    titleName: "奥本海默",
-    seasonLabel: "第 1 季",
-    status: "succeeded",
-    newlyObtained: ["S01E01", "S01E02", ..., "S01E08"],
-    realMissing: [],
-    posterPath: "/xX6f8z9.jpg",      // → image.tmdb.org/t/p/w500/xX6f8z9.jpg
-    landedFileBytes: 40_000_000_000,  // 40GB
-  },
-  webBaseUrl: "https://my-mediary.example.com",
-});
+// 把通知事件渲染成纯文本消息 (report → emoji 文本；无 report → 原样 title/body)
+const message = buildPushMessage(notification, sourceLabel ? { sourceLabel } : undefined);
 
-// 发送到所有已配置渠道 (notify.ts:320)
-await dispatchNotifications({
-  channels: [
-    createBarkChannel(key),         // iOS APNs
-    createServerChanChannel(key),   // 微信
-    createWeComChannel(key),        // 企微
-    createWebhookChannel(url),      // 自定义
-  ],
-  messages: [message],
-});
+// POST 到账号配置的企业微信群机器人；解析 errcode，非 0 视为失败
+await sendWeComText({ webhookUrl, message });
 ```
 
-**推送内容示例** (L2 富文本):
+**推送内容示例** (企业微信 text):
 
 ```
-📺 奥本海默 第 1 季 · 已完成
+奥本海默 第 1 季
+📺 奥本海默 第 1 季
 
-✅ S01E01 · S01E02 · S01E03 · S01E04
-   S01E05 · S01E06 · S01E07 · S01E08
-📁 夸克 → TV/Oppenheimer (2023)/Season 1
-💾 40.0 GB
+✅ 已获取至最新第 8 集
+✅ 本次新增：E08
+🎞 每集：约 5.0 GB
+📦 来源网盘：夸克网盘
 ```
 
 #### 12.5.4 UI 刷新
@@ -1234,7 +1213,7 @@ await dispatchNotifications({
 | **Agent 执行** | 夸克鉴权失效 (31001) | 冻结该 drive, 通知用户重新扫码 |
 | **Agent 执行** | 搜索无源 | Agent 调 `reportNoCoverage` → 状态 `no_coverage` → 下次 patrol 重试 |
 | **持久化** | PG 写入失败 | 异常向上传播 → Worker catch → `handleWorkflowRunFailure` |
-| **推送** | 渠道发送失败 | 单渠道失败不影响其他渠道, 不阻塞 run 结果 |
+| **推送** | 企微发送失败 (HTTP/errcode) | 抛错由调用方记录日志, 不阻塞 run 结果 |
 | **定时巡检** | 巡检整体失败 | 释放当天 claim, 下次 ping 重试 (不等到明天) |
 
 ---
@@ -1574,10 +1553,7 @@ flowchart LR
     end
 
     subgraph Push["通知渠道 (notify.ts)"]
-        N1["Bark<br/>iOS APNs"]
-        N2["Server酱<br/>微信模板消息"]
-        N3["企微机器人<br/>Webhook Markdown"]
-        N4["自定义 Webhook<br/>HTTP POST JSON"]
+        N1["企业微信群机器人<br/>Webhook text"]
     end
 
     subgraph UI["前端刷新"]
@@ -1695,7 +1671,7 @@ flowchart TD
 | **夸克转存** | `packages/workflow/src/quark-storage-executor.ts` | `QuarkStorageExecutor.transfer` (111) |
 | **夸克 API** | `packages/workflow/src/quark-cookie-client.ts` | `getShareToken` (143), `saveShare` (181), `pollTask` (207) |
 | **桥接持久化** | `packages/workflow/src/acquisition-v2/workflow-v2-bridge.ts` | `bridgeV2WorkflowToResult` (70), `bridgeSeason` (124) |
-| **通知推送** | `packages/workflow/src/notify.ts` | `sendPushNotifications` (320), `buildNotifyMessage` (64) |
+| **通知推送** | `packages/workflow/src/notify.ts` | `sendPushNotifications`, `buildPushMessage`, `sendWeComText` |
 | **死链过滤** | `packages/workflow/src/acquisition-v2/dead-links.ts` | `deadLinkKey` (69), `deadLinkReason` (94) |
 | **搜索门** | `packages/workflow/src/planning-search-gate.ts` | `keywordReferencesTitle` (56), `decideSearchGate` (65) |
 | **系统性阻塞** | `packages/workflow/src/acquisition-v2/transfer-block.ts` | `isSystemicTransferBlockMessage` (30) |

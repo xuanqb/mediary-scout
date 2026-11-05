@@ -268,9 +268,6 @@ function buildNotification(input: {
 }): NotificationEvent {
   const { title, mode, seasons, status, workflowRunId } = input;
   const noCoverage = status === "no_coverage";
-  const landed =
-    input.newlyObtainedCodes.length > 0 ||
-    (input.replacementResults ?? []).some((result) => result.outcome === "replaced");
   const titleMeta = {
     posterPath: title.posterPath ?? null,
     tmdbId: title.tmdbId,
@@ -297,7 +294,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report: landed ? { ...report, landed: true } : report,
+      report,
     };
   }
 
@@ -321,7 +318,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report: landed ? { ...report, landed: true } : report,
+      report,
     };
   }
 
@@ -365,7 +362,7 @@ function buildNotification(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "scheduled",
-      report: landed ? { ...report, landed: true } : report,
+      report,
     };
   }
 
@@ -377,6 +374,6 @@ function buildNotification(input: {
     body: formatReportPushText(report),
     createdAt: input.now(),
     trigger: "user",
-    report: landed ? { ...report, landed: true } : report,
+    report,
   };
 }

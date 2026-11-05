@@ -338,16 +338,12 @@ export interface NotificationReport {
   lines: string[];
   /** Episodes obtained THIS run (the daily-sweep additions). */
   newlyObtained: string[];
-  /** True only when this run actually landed new files. A patrol no-op or an
-   *  Emby-only skip must NOT trigger downstream automation (SmartStrm). */
-  landed?: boolean;
   /** Aired-but-not-obtained genuine gaps. Never includes unaired episodes. */
   realMissing: string[];
-  /** TMDB poster path (e.g. "/abc.jpg"); rendered as an image in rich pushes via
+  /** TMDB poster path (e.g. "/abc.jpg"); the notification card renders it via
    *  the TMDB CDN — no self-hosting. Null/absent → no poster. */
   posterPath?: string | null;
-  /** For the tap-through link `{webBaseUrl}/show/{tmdbId}` (only when a public
-   *  base URL is configured). */
+  /** TMDB id, used by the notification card to link the title. */
   tmdbId?: number;
   mediaType?: MediaType;
   /** Four-shelf library category the run landed into (电影/电视剧/综艺/动漫). */
@@ -360,8 +356,6 @@ export interface NotificationReport {
   landingDir?: string;
   /** Short drive labels where files landed during this run (e.g. ["115"] or ["115", "123"]). */
   driveLabels?: string[];
-  /** Connected storage ids that actually received files this run (multi-drive). */
-  landedStorageIds?: string[];
 }
 
 export interface NotificationEvent {

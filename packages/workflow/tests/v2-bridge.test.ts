@@ -146,8 +146,6 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
     expect(result.notification.trigger).toBe("scheduled");
     expect(result.notification.report?.status).toBe("airing");
     expect(result.notification.report?.newlyObtained).toEqual([]);
-    // Patrol no-op wrote nothing → downstream automation (SmartStrm) must stay quiet.
-    expect(result.notification.report?.landed).toBeUndefined();
   });
 
   it("type3 patrol: airing 但本次真收到新集 → 仍是 episodes_restored（不许把有效更新降噪掉）", () => {
@@ -166,11 +164,9 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
 
     expect(result.notification.kind).toBe("episodes_restored");
     expect(result.notification.report?.newlyObtained).toEqual(["E05"]);
-    // Real new file this run → automation webhook may fire.
-    expect(result.notification.report?.landed).toBe(true);
   });
 
-  it("replace run: a replaced episode marks landed; a not_found-only run does not", () => {
+  it("replace run: a replaced episode reports replaced; a not_found-only run reports no_coverage", () => {
     const replaceV2 = (outcome: "replaced" | "not_found") =>
       v2Result({
         obtained: ["S01E01"],
@@ -198,8 +194,8 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
       now: () => "2026-11-04T00:00:00.000Z",
     });
 
-    expect(replaced.notification.report?.landed).toBe(true);
-    expect(notFound.notification.report?.landed).toBeUndefined();
+    expect(replaced.notification.report?.status).toBe("replaced");
+    expect(notFound.notification.report?.status).toBe("no_coverage");
   });
 
   it("type3 patrol: 有已播缺集（partial）→ 仍是 episodes_restored（真缺集不降噪）", () => {

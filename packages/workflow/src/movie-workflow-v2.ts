@@ -277,9 +277,7 @@ function buildResult(input: {
       body: formatReportPushText(report),
       createdAt: input.now(),
       trigger: "user",
-      report: (input.replacementResults ?? []).some((result) => result.outcome === "replaced")
-        ? { ...report, landed: true }
-        : report,
+      report,
     };
     return {
       status: input.status,
@@ -319,7 +317,6 @@ function buildResult(input: {
             classifySearchSourceFault(input.auditEvents)?.reason ?? null,
           ),
         };
-  const landed = input.obtained && !input.availableInEmby;
   const notification: NotificationEvent = {
     id: `notification_${input.request.workflowRunId}`,
     workflowRunId: input.request.workflowRunId,
@@ -327,10 +324,10 @@ function buildResult(input: {
     // leading icon + daily-digest don't count it as 暂无资源.
     kind: report.status === "failed" ? "transfer_failed" : input.kind,
     title: input.request.title.title,
-    body: formatReportPushText(landed ? { ...report, landed: true } : report),
+    body: formatReportPushText(report),
     createdAt: input.now(),
     trigger: "user",
-    report: landed ? { ...report, landed: true } : report,
+    report,
   };
 
   return {

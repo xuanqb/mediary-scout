@@ -159,7 +159,6 @@ describe("runMovieAcquisitionV2 — obtained comes from the AGENT'S coverage, ne
 
     expect(result.status).toBe("succeeded");
     expect(result.episodes[0]!.obtained).toBe(true);
-    expect(result.notification.report?.landed).toBe(true);
   });
 
   it("中文字幕软兜底: markObtained({subtitleFallback:true}) flags 可能无中文字幕 in the notification (环太平洋)", async () => {
@@ -355,8 +354,6 @@ describe("runMovieAcquisitionV2 — user request (replace_request run)", () => {
       identified: true,
     });
     expect((await executor.listTree({ directoryId: movieDir })).map((f) => f.providerFileId)).toContain("oldfilm");
-    // Nothing replaced this run → no new file → downstream automation stays quiet.
-    expect(result.notification.report?.landed).toBeUndefined();
   });
 
   it("no user request → no replacement on the result", async () => {
@@ -399,7 +396,5 @@ describe("runMovieAcquisitionV2 — user request (replace_request run)", () => {
     expect(result.status).toBe("succeeded");
     expect(result.episodes[0]).toMatchObject({ obtained: false, availableInEmby: true });
     expect(result.notification.report?.lines).toEqual(["Emby 已有，跳过获取"]);
-    // Emby-only skip wrote nothing → must not trigger SmartStrm.
-    expect(result.notification.report?.landed).toBeUndefined();
   });
 });

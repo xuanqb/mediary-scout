@@ -80,7 +80,7 @@ curl -H "Authorization: Bearer $TOKEN" "$BASE/api/agent/config"
   "pansouBaseUrl": "…",
   "prowlarr": { "baseURL": "…", "apiKey": "***" },
   "tmdbApiKey": "***",
-  "push": { "bark": "…", "serverchan": "***" },
+  "push": { "wecom": "***" },
   "storages": [ { "id": "cs_…", "brand": "pan115", "name": "…" } ]
 }
 ```
@@ -122,7 +122,7 @@ curl -X PUT \
 - **不接受 `storages`**：改盘绑定要在网页设置里做（QR/凭据交互无法 agent 化）。
 - **校验失败 → 400**：响应含具体字段名与失败原因，据此修正后重试。
 
-**可写字段（示例）**：`qualityPreference`、`preferredLanguage`、`dailySweepTime`、`pansouBaseUrl`、`llm.{baseURL,modelId,apiKey}`、`prowlarr.{baseURL,apiKey}`、`tmdbApiKey`、`push.{bark,serverchan,…}`。以 GET 返回的结构为准。
+**可写字段（示例）**：`qualityPreference`、`preferredLanguage`、`dailySweepTime`、`pansouBaseUrl`、`llm.{baseURL,modelId,apiKey}`、`prowlarr.{baseURL,apiKey}`、`tmdbApiKey`、`push.wecom`。以 GET 返回的结构为准。
 
 ---
 

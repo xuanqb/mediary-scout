@@ -1,16 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  buildNotifyMessage,
-  createBarkChannel,
-  createNotifyChannelsFromEnv,
-  createServerChanChannel,
-  createWebhookChannel,
-  createWeComChannel,
-  dispatchNotifications,
+  buildPushMessage,
   driveDisplayName,
   resolveDriveSourceLabels,
+  sendPushNotifications,
+  sendWeComText,
+  splitWeComContent,
+  weComMessageParts,
+  WECOM_TEXT_MAX_BYTES,
   type NotificationReport,
-  type NotifyFetch,
+  type PushMessage,
+  type WeComFetch,
 } from "../src/index.js";
 
 describe("driveDisplayName", () => {
@@ -77,278 +77,191 @@ describe("resolveDriveSourceLabels (gate: account drive count ≥ 2)", () => {
   });
 });
 
-describe("buildNotifyMessage sourceLabel", () => {
-  const sampleReport: NotificationReport = {
-    titleName: "阿甘正传",
-    seasonLabel: null,
-    status: "acquired",
-    lines: ["已获取"],
-    newlyObtained: [],
-    realMissing: [],
-    year: 1994,
-  };
-  it("appends a 来源网盘 line to markdown AND the text fallback when given", () => {
-    const m = buildNotifyMessage(sampleReport, { sourceLabel: "夸克网盘" });
-    expect(m.markdown).toContain("来源网盘：夸克网盘");
-    expect(m.text).toContain("来源网盘：夸克网盘");
-  });
-  it("omits it entirely when no sourceLabel (现状回归)", () => {
-    const m = buildNotifyMessage(sampleReport, {});
-    expect(m.markdown).not.toContain("来源网盘");
-    expect(m.text).not.toContain("来源网盘");
-  });
-});
-
-interface RecordedRequest {
-  url: string;
-  method: string;
-  headers: Record<string, string>;
-  body: string;
-}
-
-function recordingFetch(requests: RecordedRequest[], ok = true): NotifyFetch {
-  return async (url, init) => {
-    requests.push({
-      url,
-      method: init.method,
-      headers: init.headers ?? {},
-      body: init.body ?? "",
-    });
-    return { ok, status: ok ? 200 : 500 };
-  };
-}
-
-const message = {
-  title: "黑袍纠察队 更新",
-  text: "S05E08 已入库",
-  markdown: "**S05E08** 已入库",
+const sampleReport: NotificationReport = {
+  titleName: "阿甘正传",
+  seasonLabel: null,
+  status: "acquired",
+  lines: ["已获取"],
+  newlyObtained: [],
+  realMissing: [],
+  year: 1994,
 };
 
-describe("notify channels", () => {
-  it("bark posts JSON to api.day.app with the device key", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createBarkChannel({ key: "device_key", fetchImpl: recordingFetch(requests) });
-    await channel.send(message);
+function notification(report?: NotificationReport) {
+  return {
+    id: "n1",
+    workflowRunId: "run1",
+    kind: "acquire",
+    title: "t",
+    body: "b",
+    createdAt: "2026-06-13T00:00:00.000Z",
+    ...(report ? { report } : {}),
+  };
+}
 
-    expect(requests[0]?.url).toBe("https://api.day.app/device_key");
-    const body = JSON.parse(requests[0]!.body);
-    expect(body).toMatchObject({ title: message.title, body: message.text, group: "media-track" });
+describe("buildPushMessage", () => {
+  it("renders a report with a year title and the source-drive line", () => {
+    const m = buildPushMessage(notification(sampleReport), { sourceLabel: "夸克网盘" });
+    expect(m.title).toBe("阿甘正传 (1994)");
+    expect(m.text).toContain("已获取");
+    expect(m.text).toContain("📦 来源网盘：夸克网盘");
   });
 
-  it("serverchan posts title/desp with markdown preferred", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createServerChanChannel({
-      sendKey: "SCT_KEY",
-      fetchImpl: recordingFetch(requests),
-    });
-    await channel.send(message);
-
-    expect(requests[0]?.url).toBe("https://sctapi.ftqq.com/SCT_KEY.send");
-    const body = new URLSearchParams(requests[0]!.body);
-    expect(body.get("title")).toBe(message.title);
-    expect(body.get("desp")).toBe(message.markdown);
+  it("omits the source line when no sourceLabel (single-drive)", () => {
+    expect(buildPushMessage(notification(sampleReport)).text).not.toContain("来源网盘");
   });
 
-  it("wecom posts markdown msgtype when markdown is present, text otherwise", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createWeComChannel({
-      webhookUrl: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=K",
-      fetchImpl: recordingFetch(requests),
-    });
-    await channel.send(message);
-    await channel.send({ title: "t", text: "plain" });
-
-    expect(JSON.parse(requests[0]!.body)).toEqual({
-      msgtype: "markdown",
-      markdown: { content: `**${message.title}**\n${message.markdown}` },
-    });
-    expect(JSON.parse(requests[1]!.body)).toEqual({
-      msgtype: "text",
-      text: { content: "t\nplain" },
-    });
-  });
-
-  it("bark uses the poster as the icon and adds the tap-through url", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createBarkChannel({ key: "k", fetchImpl: recordingFetch(requests) });
-    await channel.send({ title: "热辣滚烫", text: "已入库", imageUrl: "https://img/p.jpg", url: "https://app/show/1" });
-    expect(JSON.parse(requests[0]!.body)).toMatchObject({ icon: "https://img/p.jpg", url: "https://app/show/1" });
-  });
-
-  it("wecom uses a news card (poster + link) when an image and url are present", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createWeComChannel({ webhookUrl: "https://q/send?key=K", fetchImpl: recordingFetch(requests) });
-    await channel.send({ title: "热辣滚烫", text: "已入库", markdown: "**热辣滚烫**", imageUrl: "https://img/p.jpg", url: "https://app/show/1" });
-    expect(JSON.parse(requests[0]!.body)).toEqual({
-      msgtype: "news",
-      news: { articles: [{ title: "热辣滚烫", description: "已入库", url: "https://app/show/1", picurl: "https://img/p.jpg" }] },
-    });
-  });
-
-  it("generic webhook posts the whole message as JSON", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createWebhookChannel({
-      url: "https://example.com/hook",
-      fetchImpl: recordingFetch(requests),
-    });
-    await channel.send(message);
-
-    expect(requests[0]?.url).toBe("https://example.com/hook");
-    expect(JSON.parse(requests[0]!.body)).toMatchObject({
-      title: message.title,
-      text: message.text,
-      markdown: message.markdown,
-    });
-  });
-
-  it("builds only the channels configured in env", () => {
-    const channels = createNotifyChannelsFromEnv({
-      MEDIA_TRACK_PUSH_BARK_KEY: "bk",
-      MEDIA_TRACK_PUSH_WEBHOOK_URL: "https://example.com/h",
-    });
-    expect(channels.map((channel) => channel.id).sort()).toEqual(["bark", "webhook"]);
-    expect(createNotifyChannelsFromEnv({})).toEqual([]);
-  });
-});
-
-describe("dispatchNotifications", () => {
-  it("sends every notification to every channel and reports failures without throwing", async () => {
-    const okRequests: RecordedRequest[] = [];
-    const ok = createBarkChannel({ key: "k", fetchImpl: recordingFetch(okRequests) });
-    const failing = createWebhookChannel({
-      url: "https://down.example.com/hook",
-      fetchImpl: recordingFetch([], false),
-    });
-
-    const result = await dispatchNotifications({
-      channels: [ok, failing],
-      notifications: [
-        {
-          id: "n1",
-          workflowRunId: "r1",
-          kind: "episodes_restored",
-          title: "翘楚 episodes restored",
-          body: "2 episodes restored",
-          createdAt: "2026-06-13T00:00:00.000Z",
-        },
-        {
-          id: "n2",
-          workflowRunId: "r1",
-          kind: "already_current",
-          title: "翘楚 already current",
-          body: "0 episodes restored",
-          createdAt: "2026-06-13T00:00:01.000Z",
-        },
-      ],
-    });
-
-    expect(okRequests).toHaveLength(2);
-    expect(result.sent).toBe(2);
-    expect(result.failures).toHaveLength(2);
-    expect(result.failures[0]?.channelId).toBe("webhook");
-  });
-
-  it("builds a RICH message from the report (poster + markdown + link) via buildNotifyMessage", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createWebhookChannel({ url: "https://hook", fetchImpl: recordingFetch(requests) });
-    await dispatchNotifications({
-      channels: [channel],
-      notifications: [
-        {
-          id: "n",
-          workflowRunId: "r",
-          kind: "movie_init",
-          title: "热辣滚烫",
-          body: "📺 热辣滚烫\n✅ 已获取入库",
-          createdAt: "2026-06-16T00:00:00.000Z",
-          report: {
-            titleName: "热辣滚烫",
-            seasonLabel: null,
-            status: "acquired",
-            lines: ["已获取入库"],
-            newlyObtained: [],
-            realMissing: [],
-            posterPath: "/p.jpg",
-            tmdbId: 1184918,
-            mediaType: "movie",
-            year: 2024,
-          },
-        },
-      ],
-      opts: { webBaseUrl: "https://app.example.com" },
-    });
-    const sent = JSON.parse(requests[0]!.body);
-    // imageUrl is still carried for native-image channels (Bark icon, 企微 news)...
-    expect(sent.imageUrl).toBe("https://image.tmdb.org/t/p/w500/p.jpg");
-    expect(sent.url).toBe("https://app.example.com/show/1184918");
-    // ...but the markdown body is digest-style text — no inline poster.
-    expect(sent.markdown).not.toContain("![](");
-  });
-
-  it("falls back to plain {title, text} when a notification has no report", async () => {
-    const requests: RecordedRequest[] = [];
-    const channel = createWebhookChannel({ url: "https://hook", fetchImpl: recordingFetch(requests) });
-    await dispatchNotifications({
-      channels: [channel],
-      notifications: [{ id: "n", workflowRunId: "r", kind: "x", title: "T", body: "B", createdAt: "2026-06-16T00:00:00.000Z" }],
-    });
-    expect(JSON.parse(requests[0]!.body)).toMatchObject({ title: "T", text: "B" });
-  });
-});
-
-describe("buildNotifyMessage — rich per-channel push payload (L2)", () => {
-  function movieReport(extra: Partial<NotificationReport> = {}): NotificationReport {
-    return {
-      titleName: "热辣滚烫",
-      seasonLabel: null,
-      status: "acquired",
-      lines: ["已获取入库"],
-      newlyObtained: [],
-      realMissing: [],
-      fileCount: 1,
-      totalBytes: Math.round(1.4 * 1024 * 1024 * 1024),
-      posterPath: "/abc.jpg",
-      tmdbId: 1184918,
-      mediaType: "movie",
-      year: 2024,
-      ...extra,
-    };
-  }
-
-  it("builds title/text/markdown/imageUrl/url from an enriched report", () => {
-    const msg = buildNotifyMessage(movieReport(), { webBaseUrl: "https://app.example.com" });
-    expect(msg.title).toBe("热辣滚烫 (2024)");
-    expect(msg.text).toContain("已获取入库"); // plain-text fallback unchanged
-    expect(msg.imageUrl).toBe("https://image.tmdb.org/t/p/w500/abc.jpg"); // TMDB CDN — no self-hosting
-    expect(msg.url).toBe("https://app.example.com/show/1184918");
-    // imageUrl is exposed for native-image channels, but the markdown body is
-    // digest-style text with NO inline poster (the user preferred that layout).
-    expect(msg.markdown).not.toContain("![](");
-    // The head lives in the `title` field; the body must not repeat it as a heading.
-    expect(msg.markdown).not.toContain("**热辣滚烫 (2024)**");
-    // Real landed volume replaces the unreliable claimed quality.
-    expect(msg.markdown).toContain("体积：1.4 GB");
-    expect(msg.markdown).not.toContain("画质");
-    expect(msg.markdown).toContain("https://app.example.com/show/1184918");
-  });
-
-  it("degrades gracefully with NO webBaseUrl (local dev, no domain) — poster stays, no link", () => {
-    const msg = buildNotifyMessage(movieReport());
-    expect(msg.url).toBeUndefined();
-    expect(msg.markdown).not.toContain("查看详情");
-    expect(msg.imageUrl).toBe("https://image.tmdb.org/t/p/w500/abc.jpg"); // poster works without a domain
-  });
-
-  it("omits the poster when the title has no posterPath", () => {
-    const msg = buildNotifyMessage(movieReport({ posterPath: null }), { webBaseUrl: "https://app.example.com" });
-    expect(msg.imageUrl).toBeUndefined();
-    expect(msg.markdown).not.toContain("![](");
-  });
-
-  it("a TV season carries the season label, not a movie year, in the title", () => {
-    const msg = buildNotifyMessage(
-      movieReport({ seasonLabel: "第 1 季", mediaType: "tv", year: 2026, status: "airing", lines: ["已获取至最新第 6 集"] }),
+  it("a TV season carries the season label, not the year", () => {
+    const m = buildPushMessage(
+      notification({ ...sampleReport, seasonLabel: "第 1 季", year: 2026 }),
     );
-    expect(msg.title).toBe("热辣滚烫 第 1 季");
+    expect(m.title).toBe("阿甘正传 第 1 季");
+  });
+
+  it("keeps stored title/body for events without a report (digest/test/legacy)", () => {
+    expect(buildPushMessage(notification())).toEqual({ title: "t", text: "b" });
+  });
+});
+
+type RecordedCall = [string, RequestInit];
+
+function weComOk(): WeComFetch {
+  return vi.fn(async () =>
+    new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), { status: 200 }),
+  ) as unknown as WeComFetch;
+}
+
+function recordedCalls(fetchImpl: WeComFetch): RecordedCall[] {
+  return (fetchImpl as unknown as { mock: { calls: RecordedCall[] } }).mock.calls;
+}
+
+function postedContents(fetchImpl: WeComFetch): string[] {
+  return recordedCalls(fetchImpl).map(([, init]) => {
+    const payload = JSON.parse(String(init.body)) as { msgtype: string; text: { content: string } };
+    expect(payload.msgtype).toBe("text");
+    return payload.text.content;
+  });
+}
+
+describe("sendWeComText", () => {
+  const message: PushMessage = { title: "黑袍纠察队 更新", text: "S05E08 已入库" };
+
+  it("posts ONLY a text msgtype with title + body", async () => {
+    const fetchImpl = weComOk();
+    await sendWeComText({ webhookUrl: "https://qyapi.example/send?key=K", message, fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(recordedCalls(fetchImpl)[0]![1].body))).toEqual({
+      msgtype: "text",
+      text: { content: "黑袍纠察队 更新\nS05E08 已入库" },
+    });
+  });
+
+  it("throws when errcode is non-zero (HTTP 200 is not delivery)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ errcode: 40058, errmsg: "content exceed max length" }), { status: 200 }),
+    ) as unknown as WeComFetch;
+    await expect(
+      sendWeComText({ webhookUrl: "https://q/send?key=K", message, fetchImpl }),
+    ).rejects.toThrow(/errcode 40058.*content exceed max length/);
+  });
+
+  it("throws when the body is not JSON / has no errcode", async () => {
+    const fetchImpl = vi.fn(async () => new Response("<html>bad gateway</html>", { status: 200 })) as unknown as WeComFetch;
+    await expect(
+      sendWeComText({ webhookUrl: "https://q/send?key=K", message, fetchImpl }),
+    ).rejects.toThrow(/wecom push failed: HTTP 200/);
+  });
+
+  it("throws on a non-2xx response", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ errcode: 93000, errmsg: "invalid webhook url" }), { status: 500 }),
+    ) as unknown as WeComFetch;
+    await expect(
+      sendWeComText({ webhookUrl: "https://q/send?key=K", message, fetchImpl }),
+    ).rejects.toThrow(/HTTP 500 errcode 93000/);
+  });
+
+  it("never puts the webhook URL (and its key) in the error", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    }) as unknown as WeComFetch;
+    await expect(
+      sendWeComText({ webhookUrl: "https://q/send?key=SECRET", message, fetchImpl }),
+    ).rejects.toThrow(/^wecom push failed: TimeoutError$/);
+  });
+});
+
+describe("WeCom text splitting", () => {
+  it("leaves a short message as one un-prefixed part", () => {
+    expect(weComMessageParts({ title: "t", text: "b" })).toEqual(["t\nb"]);
+  });
+
+  it("splits long line-based text into [i/n] parts that all fit the byte limit", () => {
+    const lines = Array.from({ length: 80 }, () => "这一行包含足够多的中文内容用于测试分段逻辑");
+    const parts = weComMessageParts({ title: "每日巡检", text: lines.join("\n") });
+
+    expect(parts.length).toBeGreaterThan(1);
+    expect(parts[0]!.startsWith("[1/")).toBe(true);
+    for (const part of parts) {
+      expect(new TextEncoder().encode(part).length).toBeLessThanOrEqual(WECOM_TEXT_MAX_BYTES);
+    }
+    const joined = parts.join("\n");
+    for (const line of lines) expect(joined).toContain(line);
+  });
+
+  it("hard-splits a single line longer than the limit", () => {
+    const parts = splitWeComContent("中".repeat(1500), 2048);
+    expect(parts.length).toBeGreaterThan(1);
+    for (const part of parts) {
+      expect(new TextEncoder().encode(part).length).toBeLessThanOrEqual(2048);
+    }
+  });
+});
+
+describe("sendPushNotifications (WeCom only)", () => {
+  afterEach(() => {
+    delete process.env.MEDIA_TRACK_PUSH_WECOM_WEBHOOK;
+  });
+
+  it("reads override > DB > env and sends through WeCom", async () => {
+    process.env.MEDIA_TRACK_PUSH_WECOM_WEBHOOK = "https://env/send?key=E";
+    const fetchImpl = weComOk();
+    const repository = { getSetting: vi.fn(async () => "https://db/send?key=D") };
+
+    const sent = await sendPushNotifications({
+      repository,
+      notification: notification(sampleReport),
+      overrideConfig: { wecom: "https://override/send?key=O" },
+      fetchImpl,
+    });
+
+    expect(sent).toEqual(["wecom"]);
+    expect(recordedCalls(fetchImpl)[0]![0]).toBe("https://override/send?key=O");
+    expect(postedContents(fetchImpl)[0]).toContain("阿甘正传");
+  });
+
+  it("returns [] and sends nothing when no webhook is configured anywhere", async () => {
+    const fetchImpl = weComOk();
+    const sent = await sendPushNotifications({
+      repository: { getSetting: async () => null },
+      notification: notification(sampleReport),
+      fetchImpl,
+    });
+    expect(sent).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("propagates a delivery failure (callers log it)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ errcode: 40058, errmsg: "too long" }), { status: 200 }),
+    ) as unknown as WeComFetch;
+    await expect(
+      sendPushNotifications({
+        repository: { getSetting: async () => "https://db/send?key=D" },
+        notification: notification(sampleReport),
+        fetchImpl,
+      }),
+    ).rejects.toThrow(/errcode 40058/);
   });
 });

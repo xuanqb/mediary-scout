@@ -540,7 +540,6 @@ function appendMultiDriveBreakdownToNotifications(
     touched.map((d) => [d.storageId, shortDriveLabel(d.label)]),
   );
   const driveLabels = [...new Set(drivesWithFiles.map((d) => shortDriveLabel(d.label)))];
-  const landedStorageIds = [...new Set(drivesWithFiles.map((d) => d.storageId))];
   const countByStorage = new Map<string, Set<string>>();
   for (const c of copies) {
     let set = countByStorage.get(c.storageId);
@@ -564,7 +563,6 @@ function appendMultiDriveBreakdownToNotifications(
     const nextReport = {
       ...n.report,
       ...(driveLabels.length > 0 ? { driveLabels } : {}),
-      ...(landedStorageIds.length > 0 ? { landedStorageIds } : {}),
       ...(breakdownLine ? { lines: [...n.report.lines, breakdownLine] } : {}),
     };
     return {
@@ -1357,8 +1355,6 @@ export async function runMovieAcquisitionV2AndPersist(input: {
     obtainedMovie.length > 0
       ? (result.touchedTargetDrives ?? []).map((d) => shortDriveLabel(d.label))
       : [];
-  const movieStorageIds =
-    obtainedMovie.length > 0 ? [...new Set((result.touchedTargetDrives ?? []).map((d) => d.storageId))] : [];
   const movieNotifications = stampNotifications(result.notifications, input.notice).map((n) => {
     if (!n.report || movieDriveLabels.length === 0) return n;
     return {
@@ -1366,7 +1362,6 @@ export async function runMovieAcquisitionV2AndPersist(input: {
       report: {
         ...n.report,
         driveLabels: [...new Set(movieDriveLabels)],
-        ...(movieStorageIds.length > 0 ? { landedStorageIds: movieStorageIds } : {}),
       },
     };
   });

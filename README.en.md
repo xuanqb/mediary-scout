@@ -19,7 +19,7 @@
   <a href="README.md">中文</a>
 </p>
 
-Ask for a movie, show or anime; an agent searches for it, transfers the best match into your own drive (115 / Quark), reads the drive back to confirm it landed, and keeps filling in episodes that are still missing. Episodes and films already in Emby are not searched again; after landing, SmartStrm can be told to generate `.strm` files.
+Ask for a movie, show or anime; an agent searches for it, transfers the best match into your own drive (115 / Quark), reads the drive back to confirm it landed, and keeps filling in episodes that are still missing. Episodes and films already in Emby are not searched again.
 
 Support the author: [buy me a coffee](docs/support/README.md)
 
@@ -45,11 +45,10 @@ When multiple drives are connected, the agent unifies all drive pools, checks li
 - **Quark**: share-link transfer; QR login; the largest pool on PanSou.
 - **115**: share links + magnets; QR login.
 
-## Library & automation
+## Library & integration
 
-- **Four shelves**: movies / TV / variety / anime land in separate trees. Each drive can customise its root directory (nested paths such as `media/library` are supported), the four shelf names, and the mount prefix SmartStrm sees.
+- **Four shelves**: movies / TV / variety / anime land in separate trees. Each drive can customise its root directory (nested paths such as `media/library` are supported) and the four shelf names.
 - **Emby integration**: titles already in Emby are matched by TMDB id and never searched again — only the missing episodes/films are acquired; one Emby library scan is triggered after a run lands files. Library names are configurable. The library page shows only works requested/acquired through this system.
-- **SmartStrm automation webhook**: after files land on Quark, an `a_task` is sent per directory. Landings in the same directory are merged during a quiet window (15s default, 120s max wait); HMAC-SHA256 signatures, retries, a delivery log and a test button are built in. Paths include the drive's SmartStrm mount prefix. 115 is mounted directly by Emby and never triggers a STRM refresh.
 
 ## More docs
 
@@ -61,14 +60,13 @@ When multiple drives are connected, the agent unifies all drive pools, checks li
 
 ## Disclaimer
 
-Mediary Scout is open-source, self-hosted software. It is not offered, and never will be offered, as a hosted service: you run your own instance and bring your own drive and AI model credentials. It performs the same file operations you could do by hand in your own cloud drive. See [project positioning](docs/distribution-and-legal-positioning.md). Not affiliated with 115, Quark, TMDB, Emby, SmartStrm, or any indexer.
+Mediary Scout is open-source, self-hosted software. It is not offered, and never will be offered, as a hosted service: you run your own instance and bring your own drive and AI model credentials. It performs the same file operations you could do by hand in your own cloud drive. See [project positioning](docs/distribution-and-legal-positioning.md). Not affiliated with 115, Quark, TMDB, Emby, or any indexer.
 
 ## Credits
 
 - [PanSou](https://github.com/fish2018/pansou-web): resource search backend
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr): indexer manager (optional)
 - [p115client](https://github.com/ChenyangGao/p115client): 115 API reference
-- SmartStrm: `.strm` generation and the `a_task` webhook contract
 - [TMDB](https://www.themoviedb.org/): metadata (this product is not endorsed or certified by TMDB)
 
 ## Star History

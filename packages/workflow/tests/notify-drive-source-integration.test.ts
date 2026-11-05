@@ -1,22 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
-  dispatchNotifications,
+  buildPushMessage,
   resolveDriveSourceLabels,
+  sendWeComText,
   type NotificationReport,
-  type NotifyChannel,
-  type NotifyMessage,
+  type WeComFetch,
 } from "../src/index.js";
 import { formatDailyDigestPushText } from "../src/notification-report.js";
 
-// End-to-end through the REAL render + dispatch path: a fake channel captures the
-// actual NotifyMessage delivered. Proves "gate → resolve → render → deliver" composes
-// (unit-green ≠ the push actually carried the source). The gate (≥2 drives) lives in
-// resolveDriveSourceLabels; here we feed its output through dispatch and read the wire.
-
-function capturer(): { channel: NotifyChannel; sent: NotifyMessage[] } {
-  const sent: NotifyMessage[] = [];
-  return { channel: { id: "fake", async send(message) { sent.push(message); } }, sent };
-}
+// End-to-end through the REAL render + WeCom wire: a fake fetch captures the
+// actual text content. Proves "gate → resolve → render → deliver" composes
+// (unit-green ≠ the push actually carried the source).
 
 const report: NotificationReport = {
   titleName: "阿甘正传",
@@ -44,32 +38,41 @@ function notification(id: string, report?: NotificationReport) {
   };
 }
 
-describe("notification drive-source: end-to-end through a fake channel", () => {
+function captureFetch(): { fetchImpl: WeComFetch; contents: string[] } {
+  const contents: string[] = [];
+  const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => {
+    const payload = JSON.parse(String(init.body)) as { msgtype: string; text: { content: string } };
+    expect(payload.msgtype).toBe("text");
+    contents.push(payload.text.content);
+    return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), { status: 200 });
+  }) as unknown as WeComFetch;
+  return { fetchImpl, contents };
+}
+
+describe("notification drive-source: end-to-end through the WeCom wire", () => {
   it("≥2 drives → the delivered message carries the correct source drive", async () => {
     const n = notification("n1", report);
     const labels = resolveDriveSourceLabels([{ connectedStorageId: "cs_quark_x", notification: n }], drivesTwo);
-    const { channel, sent } = capturer();
-    await dispatchNotifications({
-      channels: [channel],
-      notifications: [n as never],
-      opts: { sourceLabel: labels.get("n1")! },
+    const { fetchImpl, contents } = captureFetch();
+    await sendWeComText({
+      webhookUrl: "https://q/send?key=K",
+      message: buildPushMessage(n, { sourceLabel: labels.get("n1")! }),
+      fetchImpl,
     });
-    expect(sent[0]!.markdown).toContain("来源网盘：夸克网盘");
-    expect(sent[0]!.text).toContain("来源网盘：夸克网盘");
+    expect(contents[0]).toContain("来源网盘：夸克网盘");
   });
 
   it("1 drive → the delivered message has NO source tag (gate)", async () => {
     const n = notification("n1", report);
     const labels = resolveDriveSourceLabels([{ connectedStorageId: "cs_a", notification: n }], [drivesTwo[0]!]);
     const sourceLabel = labels.get("n1");
-    const { channel, sent } = capturer();
-    await dispatchNotifications({
-      channels: [channel],
-      notifications: [n as never],
-      ...(sourceLabel ? { opts: { sourceLabel } } : {}),
+    const { fetchImpl, contents } = captureFetch();
+    await sendWeComText({
+      webhookUrl: "https://q/send?key=K",
+      message: buildPushMessage(n, sourceLabel ? { sourceLabel } : undefined),
+      fetchImpl,
     });
-    expect(sent[0]!.markdown).not.toContain("来源网盘");
-    expect(sent[0]!.text).not.toContain("来源网盘");
+    expect(contents[0]).not.toContain("来源网盘");
   });
 
   it("digest: each show line carries its source drive when ≥2 drives, and omits no_coverage shows", async () => {
@@ -116,9 +119,13 @@ describe("notification drive-source: end-to-end through a fake channel", () => {
       body: formatDailyDigestPushText([sched as never, noCov as never], { sourceLabelById: labels }),
       createdAt: "2026-06-20T00:00:00Z",
     };
-    const { channel, sent } = capturer();
-    await dispatchNotifications({ channels: [channel], notifications: [digest as never] });
-    expect(sent[0]!.text).toContain("来自115 网盘");
-    expect(sent[0]!.text).not.toContain("来自夸克网盘");
+    const { fetchImpl, contents } = captureFetch();
+    await sendWeComText({
+      webhookUrl: "https://q/send?key=K",
+      message: buildPushMessage(digest as never),
+      fetchImpl,
+    });
+    expect(contents[0]).toContain("来自115 网盘");
+    expect(contents[0]).not.toContain("来自夸克网盘");
   });
 });

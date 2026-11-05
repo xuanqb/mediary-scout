@@ -20,7 +20,7 @@
   <a href="README.en.md">English</a>
 </p>
 
-你说要哪部电影、剧或番，agent 自己去搜资源，挑最合适的转存进你自己的网盘（115 / 夸克），转完读回来确认真的到了，之后缺哪集还会接着补。已经在你 Emby 里的集不会再搜；落盘后还能自动通知 SmartStrm 生成 `.strm`。
+你说要哪部电影、剧或番，agent 自己去搜资源，挑最合适的转存进你自己的网盘（115 / 夸克），转完读回来确认真的到了，之后缺哪集还会接着补。已经在你 Emby 里的集不会再搜。
 
 点击前往赏饭：[要饭嘛，不寒碜](docs/support/README.md)
 
@@ -46,11 +46,10 @@ docker compose up -d
 - **夸克**：分享链转存，扫码登录，PanSou 上资源最多。
 - **115**：分享链 + 磁力，扫码登录。
 
-## 媒体库与自动化
+## 媒体库与联动
 
-- **四类媒体库**：电影 / 电视剧 / 综艺 / 动漫分别落到独立目录；每个网盘都能自定义根目录（支持多级，如 `影音/影视`）、四个分类目录名，以及它在 SmartStrm 里的挂载前缀。
+- **四类媒体库**：电影 / 电视剧 / 综艺 / 动漫分别落到独立目录；每个网盘都能自定义根目录（支持多级，如 `影音/影视`）和四个分类目录名。
 - **Emby 联动**：按 TMDB id 识别 Emby 里已有的集和电影，已有的不再搜索，只获取缺失部分；落盘后触发一次 Emby 媒体库扫描。媒体库名称可在设置里改成你实际用的名字。媒体库页只展示本系统请求/入库的作品。
-- **SmartStrm 自动化 Webhook**：文件落到夸克后按目录发送 `a_task`，同一目录在静默期（默认 15 秒，最长等待 120 秒）内合并为一次扫描；支持 HMAC-SHA256 签名、失败重试、投递日志和测试按钮。路径会自动带上该盘的 SmartStrm 挂载前缀。115 由 Emby 直接挂载，不触发 STRM 刷新。
 
 ## 更多文档
 
@@ -62,14 +61,13 @@ docker compose up -d
 
 ## 免责声明
 
-巡影是开源、自部署的软件，不提供、也永远不会提供托管服务：你自己跑实例，自带网盘和 AI 模型的凭证。它做的就是你本可以在自己网盘里手动完成的那些文件操作。详见[项目定位](docs/distribution-and-legal-positioning.md)。与 115、夸克、TMDB、Emby、SmartStrm 及任何索引器均无隶属关系。
+巡影是开源、自部署的软件，不提供、也永远不会提供托管服务：你自己跑实例，自带网盘和 AI 模型的凭证。它做的就是你本可以在自己网盘里手动完成的那些文件操作。详见[项目定位](docs/distribution-and-legal-positioning.md)。与 115、夸克、TMDB、Emby 及任何索引器均无隶属关系。
 
 ## 致谢
 
 - [PanSou](https://github.com/fish2018/pansou-web)：资源搜索后端
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr)：索引器管理（可选）
 - [p115client](https://github.com/ChenyangGao/p115client)：115 API 参考
-- SmartStrm：`.strm` 生成与 Webhook `a_task` 约定
 - [TMDB](https://www.themoviedb.org/)：影视元数据（本产品未获 TMDB 认证或背书）
 
 ## Star History

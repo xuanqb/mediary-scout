@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { queueCandidateSeries, queueCandidateTracking, reserveCandidate } from "../lib/workflow-runtime";
 import type { LibraryDirNames } from "../lib/workflow-runtime";
-import type { AutomationConfig } from "../lib/automation-webhook";
 import { assertNotDemo } from "../lib/demo-mode";
 
 /**
@@ -465,25 +464,20 @@ export async function savePushSettingsAction(
     const repository = getWorkflowRepository();
     const accountId = await getCurrentAccountId();
 
-    const keys = ["bark", "serverchan", "wecom", "webhook"];
-    for (const key of keys) {
-      const value = settings[key]?.trim();
-      // Only write channels the user actually typed into. An empty field means
-      // "leave unchanged" — the saved key stays masked and intact, never wiped.
-      // Per-account (the worker reads each notification's account push config via
-      // the scoped facade: account → global → env).
-      if (value) {
-        await repository.setAccountSetting(accountId, `push_${key}`, value);
-      }
+    const value = settings.wecom?.trim();
+    // An empty field means "leave unchanged" — the saved webhook stays masked and
+    // intact, never wiped. Per-account (the worker reads each account's push
+    // config via the scoped facade: account → global → env).
+    if (value) {
+      await repository.setAccountSetting(accountId, "push_wecom", value);
     }
-    
     return { success: true };
   } catch (error) {
     return { success: false, message: `保存失败：${String(error)}` };
   }
 }
 
-const PUSH_CHANNEL_KEYS = ["bark", "serverchan", "wecom", "webhook"] as const;
+const PUSH_CHANNEL_KEYS = ["wecom"] as const;
 
 /**
  * Wipe a saved push channel. Empty-on-save means "leave unchanged" (so a masked
@@ -498,104 +492,6 @@ export async function clearPushChannelAction(key: string): Promise<PushSettingsA
   try {
     const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
     await getWorkflowRepository().setAccountSetting(await getCurrentAccountId(), `push_${key}`, "");
-    return { success: true };
-  } catch (error) {
-    return { success: false, message: `清除失败：${String(error)}` };
-  }
-}
-
-/**
- * SmartStrm automation webhook. Disabling clears the pending queue (any debounced
- * tasks must not fire minutes later after the user turned it off); the delivery
- * log is kept so the user can still inspect what happened.
- */
-export async function saveAutomationWebhookAction(input: {
-  config: AutomationConfig;
-}): Promise<PushSettingsActionResult> {
-  assertNotDemo();
-  try {
-    const {
-      parseAutomationConfig,
-      AUTOMATION_CONFIG_SETTING_KEY,
-      AUTOMATION_PENDING_SETTING_KEY,
-      DEFAULT_AUTOMATION_CONFIG,
-    } = await import("../lib/automation-webhook");
-    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
-    const repository = getWorkflowRepository();
-    const accountId = await getCurrentAccountId();
-    const existing = parseAutomationConfig(
-      await repository.getAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY),
-    );
-    const next = parseAutomationConfig(
-      JSON.stringify({
-        ...DEFAULT_AUTOMATION_CONFIG,
-        ...input.config,
-        // Blank secret in the form = "keep the saved one" (never echoed back).
-        secret: input.config.secret.trim() || existing.secret,
-      }),
-    );
-    if (next.url && !/^https?:\/\//i.test(next.url)) {
-      return { success: false, message: "Webhook 地址需以 http:// 或 https:// 开头。" };
-    }
-    if (next.enabled && !next.url) {
-      return { success: false, message: "启用自动化前请先填写 Webhook 地址。" };
-    }
-    await repository.setAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY, JSON.stringify(next));
-    if (!next.enabled) {
-      await repository.setAccountSetting(accountId, AUTOMATION_PENDING_SETTING_KEY, "");
-    }
-    return { success: true };
-  } catch (error) {
-    return { success: false, message: `保存失败：${String(error)}` };
-  }
-}
-
-export async function clearAutomationWebhookAction(): Promise<PushSettingsActionResult> {
-  assertNotDemo();
-  try {
-    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
-    const { AUTOMATION_CONFIG_SETTING_KEY, AUTOMATION_PENDING_SETTING_KEY } = await import(
-      "../lib/automation-webhook"
-    );
-    const repository = getWorkflowRepository();
-    const accountId = await getCurrentAccountId();
-    await repository.setAccountSetting(accountId, AUTOMATION_CONFIG_SETTING_KEY, "");
-    await repository.setAccountSetting(accountId, AUTOMATION_PENDING_SETTING_KEY, "");
-    return { success: true };
-  } catch (error) {
-    return { success: false, message: `清除失败：${String(error)}` };
-  }
-}
-
-export async function testAutomationWebhookAction(input: {
-  url: string;
-  secret: string;
-  taskName: string;
-  storagePath: string;
-  config?: Partial<AutomationConfig>;
-}): Promise<PushSettingsActionResult> {
-  assertNotDemo();
-  try {
-    const { testAutomationWebhook } = await import("../lib/automation-webhook");
-    const result = await testAutomationWebhook(input);
-    return result.success
-      ? { success: true, message: result.message }
-      : { success: false, message: result.message };
-  } catch (error) {
-    return { success: false, message: `测试失败：${String(error)}` };
-  }
-}
-
-export async function clearAutomationDeliveriesAction(): Promise<PushSettingsActionResult> {
-  assertNotDemo();
-  try {
-    const { getWorkflowRepository, getCurrentAccountId } = await import("../lib/workflow-runtime");
-    const { AUTOMATION_LOG_SETTING_KEY } = await import("../lib/automation-webhook");
-    await getWorkflowRepository().setAccountSetting(
-      await getCurrentAccountId(),
-      AUTOMATION_LOG_SETTING_KEY,
-      "",
-    );
     return { success: true };
   } catch (error) {
     return { success: false, message: `清除失败：${String(error)}` };
@@ -1273,14 +1169,12 @@ export async function testPushNotificationAction(
     const { sendPushNotifications } = await import("@media-track/workflow");
     const { getAccountScopedSettings, getCurrentAccountId } = await import("../lib/workflow-runtime");
 
-    // Per-account: read THIS account's saved push config (account → global), and
+    // Per-account: read THIS account's saved webhook (account → global), and
     // send through the same scoped source so the test matches real delivery.
     const repository = getAccountScopedSettings(await getCurrentAccountId());
-    const configFromDb: Record<string, string> = {};
-    for (const key of ["bark", "serverchan", "wecom", "webhook"]) {
-      const dbValue = await repository.getSetting(`push_${key}`);
-      const formValue = settings[key]?.trim();
-      configFromDb[key] = formValue || dbValue || "";
+    const webhook = settings.wecom?.trim() || (await repository.getSetting("push_wecom"))?.trim() || "";
+    if (!webhook) {
+      return { success: false, message: "尚未配置企业微信 Webhook" };
     }
 
     const sentTo = await sendPushNotifications({
@@ -1290,12 +1184,14 @@ export async function testPushNotificationAction(
         workflowRunId: "test",
         kind: "test",
         title: "📢 Media Track 测试通知",
-        body: "如果你收到这条消息，说明推送渠道配置成功！",
+        body: "如果你收到这条消息，说明企业微信推送配置成功！",
         createdAt: new Date().toISOString(),
       },
-      overrideConfig: configFromDb,
+      overrideConfig: { wecom: webhook },
     });
-    
+    if (sentTo.length === 0) {
+      return { success: false, message: "尚未配置企业微信 Webhook" };
+    }
     return { success: true, sentTo };
   } catch (error) {
     return { success: false, message: `测试失败：${String(error)}` };

@@ -9,157 +9,102 @@ import {
 } from "../app/actions";
 import { runAction } from "../lib/run-action";
 
-const CHANNELS = [
-  {
-    key: "bark",
-    label: "Bark (iOS)",
-    placeholder: "粘贴 Bark Key",
-    help: "iPhone App Store 安装 Bark → 打开复制 Key",
-    link: "https://apps.apple.com/cn/app/bark/id1403753865",
-  },
-  {
-    key: "serverchan",
-    label: "Server酱 Turbo",
-    placeholder: "粘贴 SendKey",
-    help: "微信扫码登录 → 复制 SendKey（免费 5 条/天）",
-    link: "https://sct.ftqq.com",
-  },
-  {
-    key: "wecom",
-    label: "企业微信群机器人",
-    placeholder: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...",
-    help: "企业微信群 → 添加机器人 → 复制 Webhook",
-    link: "https://developer.work.weixin.qq.com/document/path/91770",
-  },
-  {
-    key: "webhook",
-    label: "通用 Webhook",
-    placeholder: "https://你的接收端/endpoint",
-    help: "自定义接收端 URL，接收 POST JSON",
-    link: null,
-  },
-] as const;
+const WECOM_PLACEHOLDER = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...";
 
-export function PushNotificationForm({ configured }: { configured: Record<string, boolean> }) {
+/** Single push channel: a WeCom group robot. Saved keys are never echoed back —
+ *  the input starts empty and only changes when the user types a replacement. */
+export function PushNotificationForm({ configured }: { configured: boolean }) {
   const [isPending, startTransition] = useTransition();
-  // Saved keys are NEVER echoed back as plaintext — inputs start empty and show
-  // a masked "already saved" placeholder. The user only types to UPDATE a key.
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [savedChannels, setSavedChannels] = useState(configured);
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState(configured);
   const [testResult, setTestResult] = useState<string | null>(null);
+
+  const note = (message: string, ms = 3000) => {
+    setTestResult(message);
+    setTimeout(() => setTestResult(null), ms);
+  };
 
   const handleSave = () => {
     startTransition(async () => {
       const r = await runAction(
-        () => savePushSettingsAction(values),
-        (msg) => {
-          setTestResult(`❌ ${msg}`);
-          setTimeout(() => setTestResult(null), 3000);
-        },
+        () => savePushSettingsAction({ wecom: value }),
+        (msg) => note(`❌ ${msg}`),
       );
       if (!r.ok) return;
-      const result = r.value;
-      if (result.success) {
-        const next = { ...savedChannels };
-        for (const [key, value] of Object.entries(values)) {
-          if (value.trim()) next[key] = true;
-        }
-        setSavedChannels(next);
-        setValues({}); // re-mask: drop the just-typed plaintext from the inputs
+      if (r.value.success) {
+        if (value.trim()) setSaved(true);
+        setValue("");
       }
-      setTestResult(result.success ? "✅ 保存成功" : `❌ ${result.message}`);
-      setTimeout(() => setTestResult(null), 3000);
+      note(r.value.success ? "✅ 保存成功" : `❌ ${r.value.message}`);
     });
   };
 
-  const handleClear = (key: string) => {
+  const handleClear = () => {
     startTransition(async () => {
       const r = await runAction(
-        () => clearPushChannelAction(key),
-        (msg) => {
-          setTestResult(`❌ ${msg}`);
-          setTimeout(() => setTestResult(null), 3000);
-        },
+        () => clearPushChannelAction("wecom"),
+        (msg) => note(`❌ ${msg}`),
       );
       if (!r.ok) return;
-      const result = r.value;
-      if (result.success) {
-        setSavedChannels((prev) => ({ ...prev, [key]: false }));
-        setValues((prev) => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        });
-        setTestResult("✅ 已清除");
-      } else {
-        setTestResult(`❌ ${result.message}`);
+      if (r.value.success) {
+        setSaved(false);
+        setValue("");
       }
-      setTimeout(() => setTestResult(null), 3000);
+      note(r.value.success ? "✅ 已清除" : `❌ ${r.value.message}`);
     });
   };
 
   const handleTest = () => {
     startTransition(async () => {
       const r = await runAction(
-        () => testPushNotificationAction(values),
-        (msg) => {
-          setTestResult(`❌ ${msg}`);
-          setTimeout(() => setTestResult(null), 5000);
-        },
+        () => testPushNotificationAction(value.trim() ? { wecom: value } : {}),
+        (msg) => note(`❌ ${msg}`, 5000),
       );
       if (!r.ok) return;
-      const result = r.value;
-      setTestResult(
-        result.success
-          ? `✅ 测试通知已发送到 ${result.sentTo?.join("、") ?? "已配置渠道"}`
-          : `❌ ${result.message}`,
-      );
-      setTimeout(() => setTestResult(null), 5000);
+      note(r.value.success ? "✅ 测试通知已发送到企业微信" : `❌ ${r.value.message}`, 5000);
     });
   };
 
   return (
     <div className="push-form">
-      {CHANNELS.map((channel) => (
-        <div className="push-channel" key={channel.key}>
-          <label>
-            <strong>{channel.label}</strong>
-            <span className="push-help">
-              {channel.help}
-              {channel.link ? (
-                <>
-                  {" · "}
-                  <a href={channel.link} target="_blank" rel="noopener noreferrer">
-                    获取方法 <ExternalLink size={12} style={{ verticalAlign: "-1px" }} />
-                  </a>
-                </>
-              ) : null}
-            </span>
-          </label>
-          <div className="push-input-row">
-            <input
-              type="text"
-              className="push-input"
-              placeholder={savedChannels[channel.key] ? "已保存 ••••••（留空则保持不变）" : channel.placeholder}
-              value={values[channel.key] ?? ""}
-              onChange={(e) => setValues({ ...values, [channel.key]: e.target.value })}
+      <div className="push-channel">
+        <label>
+          <strong>企业微信群机器人</strong>
+          <span className="push-help">
+            企业微信群 → 添加机器人 → 复制 Webhook
+            {" · "}
+            <a
+              href="https://developer.work.weixin.qq.com/document/path/91770"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              获取方法 <ExternalLink size={12} style={{ verticalAlign: "-1px" }} />
+            </a>
+          </span>
+        </label>
+        <div className="push-input-row">
+          <input
+            type="text"
+            className="push-input"
+            placeholder={saved ? "已保存 ••••••（留空则保持不变）" : WECOM_PLACEHOLDER}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            disabled={isPending}
+          />
+          {saved ? (
+            <button
+              type="button"
+              className="push-clear"
+              title="清除企业微信 Webhook"
+              onClick={handleClear}
               disabled={isPending}
-            />
-            {savedChannels[channel.key] ? (
-              <button
-                type="button"
-                className="push-clear"
-                title="清除该渠道"
-                onClick={() => handleClear(channel.key)}
-                disabled={isPending}
-              >
-                <Trash2 size={13} aria-hidden />
-                清除
-              </button>
-            ) : null}
-          </div>
+            >
+              <Trash2 size={13} aria-hidden />
+              清除
+            </button>
+          ) : null}
         </div>
-      ))}
+      </div>
 
       <div className="push-actions">
         <button className="primary-button" type="button" onClick={handleSave} disabled={isPending}>

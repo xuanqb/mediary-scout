@@ -13,7 +13,6 @@ const FIELDS: Array<{ key: keyof LibraryDirNames; label: string; fallback: strin
   { key: "tvName", label: "电视剧", fallback: "电视剧" },
   { key: "varietyName", label: "综艺", fallback: "综艺" },
   { key: "animeName", label: "动漫", fallback: "动漫" },
-  { key: "mountPrefix", label: "SmartStrm 挂载前缀", fallback: "/115 或 /quark" },
 ];
 
 /** Per-drive media tree layout. Values are single directory names; blank keeps
@@ -33,7 +32,6 @@ export function DriveLibraryDirsForm({
     tvName: initial.tvName ?? "",
     varietyName: initial.varietyName ?? "",
     animeName: initial.animeName ?? "",
-    mountPrefix: initial.mountPrefix ?? "",
   }));
   const [isPending, startTransition] = useTransition();
   const [note, setNote] = useState<string | null>(null);
@@ -87,8 +85,6 @@ export function DriveLibraryDirsForm({
         <p className="panel-note">
           路径形如「根目录/分类」；根目录可填多级，如「影音/影视」，程序会逐级创建；
           分类目录仍是单层。留空使用默认值。已入库的旧剧集不会被移动。
-          挂载前缀是这块盘在 SmartStrm 里的挂载点（如 /115），只用于拼自动化
-          storage_path；留空按品牌默认值（/115、/quark）。
         </p>
         {note ? <p className="panel-note">{note}</p> : null}
       </div>

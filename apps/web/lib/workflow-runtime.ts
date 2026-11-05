@@ -36,8 +36,6 @@ import {
   isFreeLlmPreset,
   isBlankEnvValue,
   libraryCategoryOf,
-  legacyMediaLibraryFolderName,
-  mediaLibraryFolderName,
   llmConfigError,
   formatDailyDigestPushText,
   scheduledDigestItems,
@@ -1939,23 +1937,6 @@ async function pushNotificationsSince(
       const drives = await targetRepository.listConnectedStorages(accountId);
       const sourceLabels = resolveDriveSourceLabels(entries, drives);
 
-      // Automation (SmartStrm): queue one a_task per landed folder, debounced by
-      // the background worker. Best-effort — a webhook problem never fails a push.
-      try {
-        const { enqueueAutomationForLandings } = await import("./automation-webhook");
-        await enqueueAutomationForLandings({
-          accountId,
-          entries: entries.map((entry) => ({
-            connectedStorageId: entry.connectedStorageId,
-            report: entry.notification.report,
-          })),
-        });
-      } catch (error) {
-        console.error(
-          `[automation] enqueue failed for ${accountId}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-
       const notifications = entries.map((entry) => entry.notification);
       // A scheduled sweep touches many shows; collapse this account's into ONE
       // digest. User-triggered events stay per-resource — each its own message.
@@ -2576,9 +2557,6 @@ export interface LibraryDirNames {
   tvName?: string;
   varietyName?: string;
   animeName?: string;
-  /** Where this drive is mounted inside SmartStrm (e.g. `/115`). Used only when
-   *  building automation storage paths; blank → the brand default. */
-  mountPrefix?: string;
 }
 
 /** The four-shelf names used when a drive has no custom layout. */
@@ -2589,11 +2567,6 @@ export const DEFAULT_LIBRARY_DIR_NAMES = {
   varietyName: "综艺",
   animeName: "动漫",
 } as const;
-
-/** SmartStrm mount fallback when the drive's `mountPrefix` is blank. */
-export function defaultMountPrefix(provider: string): string {
-  return provider === "quark" ? "/quark" : "/115";
-}
 
 function libraryDirNamesFromPayload(payload: unknown): LibraryDirNames {
   const raw = (payload as { libraryDirs?: unknown } | null)?.libraryDirs;
@@ -2606,7 +2579,6 @@ function libraryDirNamesFromPayload(payload: unknown): LibraryDirNames {
     "tvName",
     "varietyName",
     "animeName",
-    "mountPrefix",
   ] as const) {
     const value = source[key];
     if (typeof value === "string" && value.trim()) names[key] = value.trim();
@@ -2655,16 +2627,6 @@ export function normalizeLibraryDirNames(input: LibraryDirNames): LibraryDirName
     }
     if (segments.length > 0) names.rootName = segments.join("/");
   }
-  // The mount prefix is a SmartStrm-side path, not a drive folder: allow slashes,
-  // strip trailing ones, and ensure it is absolute.
-  const mount = input.mountPrefix?.trim();
-  if (mount) {
-    const normalized = `/${mount.replace(/^\/+/, "").replace(/\/+$/, "")}`;
-    if (normalized.length > 128) {
-      throw new Error("SmartStrm 挂载前缀不能超过 128 个字符。");
-    }
-    names.mountPrefix = normalized === "/" ? "" : normalized;
-  }
   return names;
 }
 
@@ -2703,71 +2665,6 @@ export async function saveDriveLibraryDirs(input: {
     animeCid: cids.animeCid,
     createdAt: drive.createdAt,
   });
-}
-
-/** The absolute path of a landed title's folder on ONE drive, as SmartStrm sees
- *  it: mount prefix + root + shelf + title folder. The title folder is read back
- *  from the drive so a legacy `Title (Year)` folder (no `{tmdb-N}` suffix) is
- *  matched instead of guessed. Returns null when the drive is gone. */
-export async function resolveLandedStoragePath(input: {
-  accountId: string;
-  storageId: string;
-  category: LibraryCategory;
-  title: string;
-  year?: number | null;
-  tmdbId: number;
-}): Promise<string | null> {
-  const drive = (await getWorkflowRepository().listConnectedStorages(input.accountId)).find(
-    (storage) => storage.id === input.storageId,
-  );
-  if (!drive) return null;
-  const names = libraryDirNamesFromPayload(drive.payload);
-  const mount = names.mountPrefix ?? defaultMountPrefix(drive.provider);
-  const root = names.rootName ?? DEFAULT_LIBRARY_DIR_NAMES.rootName;
-  const categoryName =
-    input.category === "movies"
-      ? names.moviesName ?? DEFAULT_LIBRARY_DIR_NAMES.moviesName
-      : input.category === "variety"
-        ? names.varietyName ?? DEFAULT_LIBRARY_DIR_NAMES.varietyName
-        : input.category === "anime"
-          ? names.animeName ?? DEFAULT_LIBRARY_DIR_NAMES.animeName
-          : names.tvName ?? DEFAULT_LIBRARY_DIR_NAMES.tvName;
-  const preferred = mediaLibraryFolderName({
-    title: input.title,
-    year: input.year,
-    tmdbId: input.tmdbId,
-  });
-  const legacy = legacyMediaLibraryFolderName({ title: input.title, year: input.year });
-  const categoryCid =
-    input.category === "movies"
-      ? drive.moviesCid
-      : input.category === "variety"
-        ? drive.varietyCid
-        : input.category === "anime"
-          ? drive.animeCid
-          : drive.tvCid;
-  let folder = preferred;
-  if (categoryCid) {
-    try {
-      const executor = await getWorkerStorageExecutor(input.accountId, input.storageId);
-      const children = await executor.listChildDirectories(categoryCid);
-      folder =
-        children.find((child) => child.name === preferred)?.name ??
-        children.find((child) => child.name === legacy)?.name ??
-        children.find((child) => child.name.endsWith(`{tmdb-${input.tmdbId}}`))?.name ??
-        preferred;
-    } catch (error) {
-      // Missing/renamed dirs shouldn't block the webhook: fall back to the name
-      // the run would have created.
-      console.warn(
-        `[automation] could not resolve the title folder on ${input.storageId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  }
-  const parts = [mount, root, categoryName, folder]
-    .map((part) => part.replace(/^\/+/, "").replace(/\/+$/, ""))
-    .filter((part) => part.length > 0);
-  return `/${parts.join("/")}`;
 }
 
 /** Manual shelf override (电影 / 电视剧 / 综艺 / 动漫). Future acquisitions route

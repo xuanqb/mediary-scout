@@ -45,16 +45,8 @@ _Avoid_: 任务、作业
 _Avoid_: 定时任务、监控
 
 **Notification**：
-面向人的推送消息，例如 Bark、Server酱、企业微信。
+面向人的推送消息，例如企业微信群机器人。
 _Avoid_: Webhook、事件
-
-**AutomationWebhook**：
-面向外部自动化的机器事件，例如触发 SmartStrm 生成 STRM。它与 `Notification` 分开配置、分开投递、分开记录。
-_Avoid_: 通知、推送
-
-**SmartStrm Trigger**：
-一次按最终目录聚合的自动化触发。同一目录在安静期内的多个文件事件合并为一次触发，而不是每集触发一次。只有夸克盘的落盘会触发；115 由 Emby 直接挂载，不生成 `.strm`。
-_Avoid_: 每集 Webhook、文件事件
 
 ## 约束
 
@@ -71,6 +63,6 @@ _Avoid_: 接口成功、转存成功
 _Avoid_: Emby 存在、接口返回成功
 
 **Landed**：
-一次运行真正写入了新文件（新集入库或替换成功）。只有 Landed 的运行才触发 `AutomationWebhook`；巡检无变化、或仅因 Emby 已有而跳过，都不算。
+一次运行真正写入了新文件（新集入库或替换成功）；巡检无变化、或仅因 Emby 已有而跳过，都不算。
 _Avoid_: 运行成功、有资源
 

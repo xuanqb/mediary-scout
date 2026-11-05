@@ -172,9 +172,6 @@ export interface WorkerRuntime {
   isDriveConfigured?: () => Promise<boolean>;
   /** How many queued runs may go at once (see DrainDeps). Optional so test runtimes can omit it. */
   concurrency?: () => Promise<number>;
-  /** Send due automation webhooks (SmartStrm); returns how many were delivered.
-   *  Optional so test runtimes can omit it. */
-  flushAutomation?: () => Promise<number>;
 }
 
 /**
@@ -191,14 +188,12 @@ export async function defaultRuntime(): Promise<WorkerRuntime> {
     workerHasConfiguredDrive,
     getWorkerConcurrency,
   } = await import("./workflow-runtime");
-  const { flushDueAutomationWebhooks } = await import("./automation-webhook");
   return {
     runNext: (claim) => runNextQueuedWorkflow(claim),
     concurrency: () => getWorkerConcurrency(),
     runScheduled: () => runScheduledType3(),
     recover: () => recoverOrphanedRuns(),
     isDriveConfigured: () => workerHasConfiguredDrive(),
-    flushAutomation: () => flushDueAutomationWebhooks(),
   };
 }
 
@@ -229,21 +224,6 @@ export function startBackgroundWorker(options?: { pollMs?: number; runtime?: Wor
   const pollMs = options?.pollMs ?? 3000;
   console.log(`[background-worker] started (poll ${pollMs}ms)`);
   const loadRuntime = options?.runtime ? async () => options.runtime! : defaultRuntime;
-  // Automation flush is independent of draining: a long acquisition must not hold
-  // a debounced SmartStrm task back (and vice versa).
-  const flushAutomation = async () => {
-    try {
-      const runtime = await loadRuntime();
-      const sent = await runtime.flushAutomation?.();
-      if (sent && sent > 0) {
-        console.log(`[background-worker] delivered ${sent} automation webhook(s)`);
-      }
-    } catch (error) {
-      console.error(
-        `[background-worker] automation flush failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
   let running = false;
   const tick = async () => {
     if (running) {
@@ -283,10 +263,6 @@ export function startBackgroundWorker(options?: { pollMs?: number; runtime?: Wor
     setInterval(() => {
       void tick();
     }, pollMs);
-    setInterval(() => {
-      void flushAutomation();
-    }, pollMs);
     void tick();
-    void flushAutomation();
   })();
 }

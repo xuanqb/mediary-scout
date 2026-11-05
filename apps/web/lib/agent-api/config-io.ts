@@ -19,7 +19,7 @@ import {
   TMDB_API_KEY_SETTING_KEY,
 } from "../workflow-runtime";
 
-const PUSH_CHANNEL_KEYS = ["bark", "serverchan", "wecom", "webhook"] as const;
+const PUSH_CHANNEL_KEYS = ["wecom"] as const;
 type PushChannelKey = (typeof PUSH_CHANNEL_KEYS)[number];
 
 export interface AgentConfigView {

@@ -12,14 +12,6 @@ export async function POST(request: NextRequest) {
   // time — so the Settings time is authoritative however often cron pings here.
   const force = new URL(request.url).searchParams.get("force") === "1";
   const result = await runScheduledType3({ force });
-  // See run-next: dedicated-worker deployments rely on this endpoint for the
-  // debounced SmartStrm flush.
-  try {
-    const { flushDueAutomationWebhooks } = await import("../../../../lib/automation-webhook");
-    await flushDueAutomationWebhooks();
-  } catch (error) {
-    console.error(`[automation] flush failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
   return NextResponse.json(result);
 }
 

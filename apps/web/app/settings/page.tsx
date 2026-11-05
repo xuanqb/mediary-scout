@@ -2,19 +2,13 @@ import { driveConnectionBadge } from "../../lib/settings-badge";
 import { maskProviderUid } from "../../lib/mask-provider-uid";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { Bell, Bot, Cable, CalendarClock, Clapperboard, ExternalLink, Gauge, KeyRound, Languages, Radio, Send, ShieldCheck, Subtitles, TriangleAlert, Users } from "lucide-react";
+import { Bell, Bot, Cable, CalendarClock, Clapperboard, ExternalLink, Gauge, KeyRound, Languages, Radio, ShieldCheck, Subtitles, TriangleAlert, Users } from "lucide-react";
 import { AppSidebar } from "../../components/app-sidebar";
 import { AddDriveBrandTabs } from "../../components/add-drive-brand-tabs";
 import { DriveLibraryDirsForm } from "../../components/drive-library-dirs-form";
 import { TestConnectionButton } from "../../components/test-connection-button";
 import { UnbindStorageButton } from "../../components/unbind-storage-button";
 import { PushNotificationForm } from "../../components/push-notification-form";
-import { AutomationWebhookForm } from "../../components/automation-webhook-form";
-import {
-  AUTOMATION_CONFIG_SETTING_KEY,
-  parseAutomationConfig,
-  readAutomationDeliveries,
-} from "../../lib/automation-webhook";
 import { PreferredLanguageForm } from "../../components/preferred-language-form";
 import { QualityPreferenceForm } from "../../components/quality-preference-form";
 import { LlmConfigForm } from "../../components/llm-config-form";
@@ -88,7 +82,6 @@ import {
   JEV_MODEL_SETTING_KEY,
   PANSOU_BASE_URL_SETTING_KEY,
   PANSOU_HEALTH_SETTING_KEY,
-  resolveLandedStoragePath,
   EMBY_BASE_URL_SETTING_KEY,
   EMBY_API_KEY_SETTING_KEY,
   EMBY_LIBRARY_NAMES_SETTING_KEY,
@@ -182,9 +175,6 @@ export default function SettingsPage({
                   </Suspense>
                   <Suspense fallback={<div className="skeleton skeleton-heading" />}>
                     <PushNotificationSection />
-                  </Suspense>
-                  <Suspense fallback={<div className="skeleton skeleton-heading" />}>
-                    <AutomationWebhookSection />
                   </Suspense>
                 </>
               }
@@ -940,73 +930,13 @@ async function DailySweepSection() {
   );
 }
 
-async function AutomationWebhookSection() {
-  await connection();
-  const accountId = await getCurrentAccountId();
-  const repository = getAccountScopedSettings(accountId);
-  const stored = parseAutomationConfig(
-    await repository.getOwnSetting(AUTOMATION_CONFIG_SETTING_KEY),
-  );
-  const config = { ...stored, secret: "" };
-  const deliveries = await readAutomationDeliveries(accountId);
-
-  // Test payload's path: the first connected Quark drive's real layout, so the
-  // button exercises the same mount-prefix + shelf + title-folder shape as a real
-  // run. 115 is mounted directly in Emby and never triggers SmartStrm.
-  const year = new Date().getFullYear();
-  let sampleStoragePath = `/quark/影视/电影/示例影片 (${year}) {tmdb-0}`;
-  const drives = await getAccountConnectedStorages();
-  const firstDrive = drives.find((drive) => drive.provider === "quark");
-  if (firstDrive) {
-    try {
-      sampleStoragePath =
-        (await resolveLandedStoragePath({
-          accountId,
-          storageId: firstDrive.id,
-          category: "movies",
-          title: "示例影片",
-          year,
-          tmdbId: 0,
-        })) ?? sampleStoragePath;
-    } catch {
-      // Keep the generic sample; the form still explains the payload shape.
-    }
-  }
-
-  return (
-    <section className="panel" style={{ maxWidth: 720, marginTop: 24 }}>
-      <div className="panel-header">
-        <div>
-          <h2 className="panel-title">
-            <Send size={16} aria-hidden style={{ verticalAlign: "-2px", marginRight: 8 }} />
-            自动化 Webhook（SmartStrm）
-          </h2>
-          <p className="panel-note">
-            每次落盘后按目录触发 SmartStrm 的 a_task，同一目录合并为一次扫描；仅夸克盘触发，115 由 Emby 直接挂载、无需生成 .strm
-          </p>
-        </div>
-      </div>
-      <AutomationWebhookForm
-        config={config}
-        secretSet={Boolean(stored.secret)}
-        sampleStoragePath={sampleStoragePath}
-        deliveries={deliveries}
-      />
-    </section>
-  );
-}
-
 async function PushNotificationSection() {
   await connection();
   const repository = getAccountScopedSettings(await getCurrentAccountId());
 
-  // Only whether each channel is configured — the plaintext key is never sent
+  // Only whether the webhook is configured — the plaintext value is never sent
   // to the client.
-  const configured: Record<string, boolean> = {};
-  for (const key of ["bark", "serverchan", "wecom", "webhook"]) {
-    const value = await repository.getSetting(`push_${key}`);
-    configured[key] = Boolean(value && value.trim());
-  }
+  const saved = await repository.getSetting("push_wecom");
 
   return (
     <section className="panel" style={{ maxWidth: 720, marginTop: 24 }}>
@@ -1016,11 +946,11 @@ async function PushNotificationSection() {
             <Bell size={16} aria-hidden style={{ verticalAlign: "-2px", marginRight: 8 }} />
             推送通知
           </h2>
-          <p className="panel-note">配置推送渠道后，每日定时巡检完成时会自动推送更新播报</p>
+          <p className="panel-note">配置企业微信群机器人后，每日定时巡检完成时会自动推送更新播报</p>
         </div>
       </div>
 
-      <PushNotificationForm configured={configured} />
+      <PushNotificationForm configured={Boolean(saved && saved.trim())} />
     </section>
   );
 }
