@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { Library, TriangleAlert } from "lucide-react";
+import { Library, Search, TriangleAlert } from "lucide-react";
 import { AcquiringPoller } from "../components/acquiring-poller";
 import { AppSidebar } from "../components/app-sidebar";
 import { RequestTrackButton } from "../components/request-track-button";
@@ -10,9 +10,7 @@ import { LibraryQuickFind } from "../components/library-quick-find";
 import { RememberQuery } from "../components/search-memory";
 import { SearchForm } from "../components/search-form";
 import { SeasonRequestMenu } from "../components/season-request-menu";
-import { TrendingRow } from "../components/trending-row";
 import { GitHubNameplate } from "../components/github-nameplate";
-import type { TrendingKind } from "../lib/trending";
 import { tmdbImageUrl } from "../lib/tmdb-image";
 import { getSearchView } from "../lib/search-page";
 import { getInProgressTitles, getLibraryWall } from "../lib/title-hub";
@@ -84,9 +82,6 @@ async function HomeSurface({
   const activeTab = stringParam(params.tab) === "library" ? "library" : "search";
   const mediaType = stringParam(params.type) || "all";
   const filter = stringParam(params.filter) || "all";
-  const trendingParam = stringParam(params.trending);
-  const activeTrending: TrendingKind =
-    trendingParam === "tv" ? "tv" : trendingParam === "anime" ? "anime" : "movie";
   // Tree model: keep searches inside the ACTIVE workspace so an acquisition lands
   // on the drive you're viewing — not silently on the primary drive. Root route
   // (no storageId) posts to "/" as before.
@@ -114,12 +109,7 @@ async function HomeSurface({
               </p>
             ) : null}
             <Suspense key={`search-${query}`} fallback={<SearchResultsSkeleton />}>
-              <SearchResults
-                query={query}
-                storageId={storageId}
-                activeTrending={activeTrending}
-                basePath={basePath}
-              />
+              <SearchResults query={query} storageId={storageId} basePath={basePath} />
             </Suspense>
           </section>
         ) : (
@@ -139,12 +129,10 @@ async function HomeSurface({
 async function SearchResults({
   query,
   storageId,
-  activeTrending,
   basePath,
 }: {
   query: string;
   storageId?: string | undefined;
-  activeTrending: TrendingKind;
   basePath: string;
 }) {
   const searchView = await getSearchView(query, storageId);
@@ -180,7 +168,11 @@ async function SearchResults({
     <>
       {inProgress.length > 0 ? <AcquiringPoller /> : null}
       {searchView.state === "empty" ? (
-        <TrendingRow activeKind={activeTrending} basePath={basePath} />
+        <div className="quiet-state">
+          <Search size={24} aria-hidden />
+          <strong>输入目标名称</strong>
+          <span>搜索后才会请求元数据。</span>
+        </div>
       ) : searchView.state === "provider_error" ? (
         // Every TMDB access (direct + proxy) is unreachable from this deployment —
         // a GFW-blocked network without a proxy (issue #134). Degrade with

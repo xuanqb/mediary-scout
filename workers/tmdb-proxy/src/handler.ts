@@ -94,20 +94,17 @@ function cacheKeyFor(request: Request): string {
 const TRENDING_TTL_SECONDS = 25 * 60 * 60; // > 24h 刷新间隔,断刷时兜底一小时
 
 /** Last-calendar-year floor (rolls yearly): the anime feed shows RECENT seasons,
- *  not TMDB's all-time-popularity classics (全职猎人1999/死神2004…). MUST match
- *  apps/web/lib/trending.ts animeFirstAirDateFloor. */
+ *  not TMDB's all-time-popularity classics (全职猎人1999/死神2004…). */
 export function animeFirstAirDateFloor(now: Date = new Date()): string {
   return `${now.getUTCFullYear() - 1}-01-01`;
 }
 
-/** The three discovery feeds the search page shows, aligned to 电影/剧集/动漫.
+/** The three discovery feeds this proxy warm-caches, aligned to 电影/剧集/动漫.
  *  Movie/TV are TMDB weekly trending. Anime has no "trending" endpoint, so it's
  *  discover/tv (日语动画) with a ROLLING first_air_date.gte (recent seasons only —
  *  bare popularity.desc surfaces decade-old classics) + vote_count.gte=50 +
- *  include_adult=false (mainstream, drops 里番/borderline). The Cron warms these
- *  and the frontend reads the SAME feed — the contract is that the PARAM SET
- *  (names+values) matches apps/web/lib/trending.ts trendingFeedQuery for the same
- *  `now`; ORDER does not matter (cacheKeyFor sorts both sides before keying). */
+ *  include_adult=false (mainstream, drops 里番/borderline). The Cron refreshes
+ *  these into KV; clients read the same URLs. */
 export function getTrendingFeeds(now: Date = new Date()): string[] {
   const floor = animeFirstAirDateFloor(now);
   return [
