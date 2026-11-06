@@ -52,7 +52,11 @@ function search(id: string, keyword: string): ResourceSnapshot {
         title: `${keyword} 4K 全12集`,
         type: "magnet",
         source: "pansou",
-        providerPayload: { url: "magnet:?xt=urn:btih:aaa", sizeBytes: 12 * 1024 ** 3 },
+        providerPayload: {
+          url: "magnet:?xt=urn:btih:aaa",
+          sizeBytes: 12 * 1024 ** 3,
+          note: "全12集；简中内封",
+        },
       },
       {
         id: `c_${id}_2`,
@@ -174,7 +178,9 @@ describe("getRunTrace", () => {
 
     expect(trace!.candidates.map((candidate) => candidate.id)).toEqual(["c_snap_1_1", "c_snap_1_2"]);
     expect(trace!.candidates[0]!.sizeBytes).toBe(12 * 1024 ** 3);
+    expect(trace!.candidates[0]!.note).toBe("全12集；简中内封");
     expect(trace!.candidates[1]!.sizeBytes).toBe(2048);
+    expect(trace!.candidates[1]!.note).toBeNull();
 
     expect(trace!.decisions[0]!.reason).toBe("唯一覆盖目标集数的 4K 资源");
     expect(trace!.transfers[0]!.providerMessage).toBe("离线下载配额不足");

@@ -67,6 +67,18 @@ describe("raw snapshot pre-warming", () => {
     expect(snapshot.candidateCount).toBe(3);
   });
 
+  it("renders the candidate note on the same line as the title", async () => {
+    const provider = new FakeResourceProviderV2({
+      results: { 后会友期: [{ id: "n1", title: "后会友期 2026", note: "全 24 集\n简中内嵌" }] },
+    });
+    const storage = new Storage115Simulator({ packs: {} });
+    const stagingDirectoryId = await storage.createDirectory({ name: "staging", parentId: "root" });
+    const sandbox = new TaskSandbox({ provider, storage, stagingDirectoryId, need: ["S01E01"] });
+    await sandbox.primeRawSnapshot("后会友期");
+    const doc = sandbox.viewResourceSnapshot().document;
+    expect(doc).toContain("[n1] 后会友期 2026 · 备注:全 24 集 简中内嵌");
+  });
+
   it("transferCandidate accepts either the returned snapshotId or a 'raw' / '活期文档' alias for a pre-warmed candidate", async () => {
     const provider = new FakeResourceProviderV2({
       results: { 咒术回战: [{ id: "jjk-s3", title: "咒术回战 第三季 全12集" }] },

@@ -159,6 +159,8 @@ export class RealResourceProviderV2 implements ResourceProviderV2 {
         const sizeBytes = includeDriveTags && typeof rawSize === "number" && Number.isFinite(rawSize) && rawSize > 0
           ? rawSize
           : undefined;
+        const rawNote = candidate.providerPayload?.["note"];
+        const note = typeof rawNote === "string" ? rawNote.replace(/\s+/g, " ").trim() : "";
         return {
           id: aliasOf.get(candidate.id)!,
           title: candidate.title,
@@ -167,6 +169,7 @@ export class RealResourceProviderV2 implements ResourceProviderV2 {
           ...(sizeBytes !== undefined ? { sizeBytes } : {}),
           ...(postedAt ? { postedAt } : {}),
           ...(linkHistory ? { linkHistory } : {}),
+          ...(note ? { note } : {}),
         };
       }),
       // 源健康态必须穿过这个边界。它在这里被丢掉过一次,后果是 6 天里源挂着,

@@ -573,6 +573,11 @@ function CandidateRow({
     <div className={`trace-cand${dropped || nsfwDropped ? " is-dropped" : ""}`}>
       <div className="trace-cand-main">
         <div className="trace-cand-title">{candidate.title}</div>
+        {candidate.note ? (
+          <div className="trace-cand-note" title={candidate.note}>
+            {candidate.note}
+          </div>
+        ) : null}
         <div className="trace-cand-meta">
           {[
             candidate.type,

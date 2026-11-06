@@ -3579,6 +3579,15 @@ select.setting-control {
 .trace-cand.is-dropped { opacity: 0.62; }
 .trace-cand-main { flex: 1; min-width: 0; }
 .trace-cand-title { font-size: 13px; line-height: 1.45; word-break: break-word; }
+.trace-cand-note {
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .trace-cand-meta { margin-top: 2px; font-size: 11px; color: var(--text-muted); }
 
 .trace-cand-flags {

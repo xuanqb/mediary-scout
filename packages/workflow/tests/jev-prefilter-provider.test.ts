@@ -44,6 +44,23 @@ describe("JevPrefilterProvider", () => {
     expect(seen[0]!.candidates).toEqual([{ id: "c1", title: "交锋 全24集" }, { id: "c2", title: "无敌少侠" }, { id: "c3", title: "权利交锋 S01E08" }]);
   });
 
+  it("shows the source note to the judge alongside the title", async () => {
+    const seen: JevJudgeInput[] = [];
+    const snap = snapshot([{ title: "交锋 全24集" }]);
+    snap.candidates[0]!.providerPayload = { note: "更新至第24集\n简中内封" };
+    await new JevPrefilterProvider({ inner: inner(snap), target, judge: judge({ c1: 0.95 }, seen), now: () => 1000 }).search({ keyword: "交锋" });
+    expect(seen[0]!.candidates).toEqual([
+      { id: "c1", title: "交锋 全24集 · 备注:更新至第24集 简中内封" },
+    ]);
+  });
+
+  it("does not let a note rescue a row in the containment floor", async () => {
+    const snap = snapshot([{ title: "无敌少侠" }]);
+    snap.candidates[0]!.providerPayload = { note: "交锋 全24集" };
+    const out = await new JevPrefilterProvider({ inner: inner(snap), target, judge: judge({ c1: 0.02 }), now: () => 1000 }).search({ keyword: "交锋" });
+    expect(out.candidates).toHaveLength(0);
+  });
+
   it("never judges title-less candidates (empty / 📅 / http) and always keeps them", async () => {
     const seen: JevJudgeInput[] = [];
     const p = new JevPrefilterProvider({ inner: inner(snapshot(["", "📅 9月6日", "https://115.com/s/abc", "无敌少侠"])), target, judge: judge({ c4: 0.01 }, seen) });

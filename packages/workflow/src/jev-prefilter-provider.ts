@@ -30,6 +30,14 @@ export function isTitleless(title: string): boolean {
   return t === "" || t.startsWith("📅") || /^https?:\/\//i.test(t);
 }
 
+/** The string the judge sees: the candidate title plus the provider's free-text
+ *  note when it has one. Rows without a note are byte-identical to before. */
+export function judgeTitle(candidate: ResourceCandidate): string {
+  const raw = candidate.providerPayload?.["note"];
+  const note = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  return note ? `${candidate.title} · 备注:${note}` : candidate.title;
+}
+
 /**
  * Pre-agent candidate filter backed by a Jev judge. Wraps ANY ResourceProvider so
  * both the system pre-warm search and the agent's searchResources are filtered.
@@ -116,7 +124,11 @@ export class JevPrefilterProvider implements ResourceProvider {
     let prefilter: SnapshotPrefilter;
     let kept: ResourceCandidate[];
     try {
-      const result = await this.judge.judgeCandidates({ target: this.target, candidates: judgeable.map((c) => ({ id: c.id, title: c.title })) });
+      // The note rides in the SAME string the judge already reads (protocol unchanged):
+      // upstream free text carries coverage ("全40集") and language claims that the
+      // title alone cannot. The containment floor below still matches the TITLE only —
+      // a note that happens to name the target must not rescue an unrelated row.
+      const result = await this.judge.judgeCandidates({ target: this.target, candidates: judgeable.map((c) => ({ id: c.id, title: judgeTitle(c) })) });
       // CONSECUTIVE failures only: an answer — even a partial one (failedChunks) — proves
       // the judge is reachable, so a flaky one never accumulates its way to an open circuit.
       this.consecutiveFailures = 0;

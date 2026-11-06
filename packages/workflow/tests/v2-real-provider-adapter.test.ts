@@ -18,7 +18,7 @@ function realSnapshot(): ResourceSnapshot {
         title: "莉可丽丝 全集 1080p",
         type: "115",
         source: "pansou",
-        providerPayload: { url: "https://115.com/s/abc", receiveCode: "x1" },
+        providerPayload: { url: "https://115.com/s/abc", receiveCode: "x1", note: "全13集；简中内封" },
       },
     ],
   };
@@ -54,14 +54,14 @@ describe("RealResourceProviderV2 — pansou → ResourceProviderV2 adapter", () 
     // Short run-local aliases, not the provider's long ids.
     expect(snapshot.id).toBe("s1");
     expect(snapshot.candidates).toEqual([
-      { id: "s1-1", title: "莉可丽丝 全集 1080p" },
+      { id: "s1-1", title: "莉可丽丝 全集 1080p", note: "全13集；简中内封" },
     ]);
     // The run id is threaded so content-addressed snapshots don't collide across runs.
     expect(calls[0]).toEqual({ keyword: "莉可丽丝 全集", workflowRunId: "run-1" });
     // The real candidate (with its share payload) is recorded so the storage
     // adapter can transfer it later by id — the agent never sees the raw url.
     // Resolvable by both the alias the agent was shown and the real id.
-    expect(registry.get("s1-1")?.providerPayload).toEqual({ url: "https://115.com/s/abc", receiveCode: "x1" });
+    expect(registry.get("s1-1")?.providerPayload).toEqual({ url: "https://115.com/s/abc", receiveCode: "x1", note: "全13集；简中内封" });
     expect(registry.get("cand_a")).toBe(registry.get("s1-1"));
     // Persisted snapshots keep the real ids.
     expect(adapter.snapshots()[0]!.id).toBe("snap_real_1");
@@ -243,7 +243,7 @@ describe("RealResourceProviderV2 — pansou → ResourceProviderV2 adapter", () 
     expect(registry.get("dead_share")).toBeUndefined();
   });
 
-  it("agent-facing candidate exposes only id and title (no hints) — Task 3", async () => {
+  it("agent-facing candidate exposes only id, title and the source note (no hints) — Task 3", async () => {
     const provider: ResourceProvider = { search: async () => realSnapshot() };
     const registry = new CandidateRegistry();
     const adapter = new RealResourceProviderV2({ provider, registry, workflowRunId: "run-1" });
@@ -251,7 +251,7 @@ describe("RealResourceProviderV2 — pansou → ResourceProviderV2 adapter", () 
     const snapshot = await adapter.search("莉可丽丝 全集");
 
     const candidate = snapshot.candidates[0]!;
-    expect(Object.keys(candidate).sort()).toEqual(["id", "title"]);
+    expect(Object.keys(candidate).sort()).toEqual(["id", "note", "title"]);
     expect(candidate.id).toBe("s1-1");
     expect(candidate.title).toBe("莉可丽丝 全集 1080p");
   });

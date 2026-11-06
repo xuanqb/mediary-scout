@@ -29,6 +29,9 @@ export interface SimResourceCandidate {
   postedAt?: string;
   /** This work's own transfers of the same link over the last 30 days. */
   linkHistory?: string;
+  /** Free-text note from the search source (coverage claims, subtitle language,
+   *  release group). Supplements the title; never part of the candidate's identity. */
+  note?: string;
 }
 
 export interface ResourceSnapshotV2 {

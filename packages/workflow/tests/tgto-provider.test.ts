@@ -86,9 +86,59 @@ describe("TgtoResourceProvider", () => {
     expect(candidate.providerPayload["targetProvider"]).toBe("115");
     expect(candidate.providerPayload["sizeBytes"]).toBe(Math.round(81.1 * 1024 ** 3));
     expect(candidate.providerPayload["datetime"]).toBe("2025-03-19");
+    expect(candidate.providerPayload["note"]).toBe("[LGNB]沙丘 4K-REMUX");
+    expect(candidate.providerPayload["messageText"]).toBe("[LGNB]沙丘 4K-REMUX");
     expect(candidate.title).toContain("2160p.REMUX");
     expect(candidate.title).toContain("字幕:简中/繁中/简英双语(内封)");
     expect(candidate.title).toContain("81.10GB");
+    // The note is a separate line for the agent/Jev — not concatenated into the title.
+    expect(candidate.title).not.toContain("[LGNB]");
+  });
+
+  it("dedupes remark/message_text/message_body into one note and keeps the raw fields", async () => {
+    const p = provider(async () => okResponse([
+      shareItem({
+        remark: "HDR 全40集",
+        message_text: "hdr 全40集",
+        message_body: "更新至第  40集",
+      }),
+    ]));
+    const snapshot = await p.search({ keyword: "沙丘" });
+    const candidate = snapshot.candidates[0]!;
+    expect(candidate.providerPayload["note"]).toBe("HDR 全40集；更新至第 40集");
+    expect(candidate.providerPayload["remark"]).toBe("HDR 全40集");
+    expect(candidate.providerPayload["messageText"]).toBe("hdr 全40集");
+    expect(candidate.providerPayload["messageBody"]).toBe("更新至第  40集");
+  });
+
+  it("caps the note at 200 characters", async () => {
+    const p = provider(async () => okResponse([shareItem({ remark: "长".repeat(250) })]));
+    const snapshot = await p.search({ keyword: "沙丘" });
+    const note = String(snapshot.candidates[0]!.providerPayload["note"]);
+    expect(note).toHaveLength(201);
+    expect(note.endsWith("…")).toBe(true);
+  });
+
+  it("never puts upstream's structured episode numbers in the title", async () => {
+    const p = provider(async () => okResponse([
+      shareItem({
+        episode: { kind: "episode", season_num: 4, episode_num: 14, end_episode_num: 14, source_text: "S04E14" },
+      }),
+    ]));
+    const snapshot = await p.search({ keyword: "诛仙" });
+    const title = snapshot.candidates[0]!.title;
+    expect(title).not.toContain("S04E14");
+    expect(title).not.toContain("E14");
+  });
+
+  it("falls back to the note as the title when upstream sends no title", async () => {
+    const p = provider(async () => okResponse([
+      shareItem({ title: "", remark: "沙丘 全12集", message_text: "沙丘 全12集", message_body: "" }),
+    ]));
+    const candidate = (await p.search({ keyword: "沙丘" })).candidates[0]!;
+    expect(candidate.title).toContain("沙丘 全12集");
+    // The note became the title; repeating it as a note would duplicate the line.
+    expect(candidate.providerPayload["note"]).toBeUndefined();
   });
 
   it("keeps a magnet item's url (copy-link never needed for it)", async () => {

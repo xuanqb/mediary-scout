@@ -2300,9 +2300,11 @@ export class TaskSandbox {
     for (const candidate of truncated) {
       const labelText = showDriveLabel ? resolveDriveLabel(candidate) : undefined;
       const driveSuffix = labelText ? ` · ${labelText}` : "";
+      const note = candidate.note?.replace(/\s+/g, " ").trim();
+      const noteSuffix = note ? ` · 备注:${note}` : "";
       const posted = candidate.postedAt ? ` · 发布 ${candidate.postedAt}` : "";
       const history = candidate.linkHistory ? ` · ${candidate.linkHistory}` : "";
-      document += `[${candidate.id}] ${candidate.title}${driveSuffix}${posted}${history}\n`;
+      document += `[${candidate.id}] ${candidate.title}${noteSuffix}${driveSuffix}${posted}${history}\n`;
     }
 
     if (remaining > 0) {

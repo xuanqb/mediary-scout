@@ -65,6 +65,8 @@ export interface RunTraceCandidate {
   snapshotKeyword: string;
   index: number;
   title: string;
+  /** The provider's deduped free-text note (Tgto remark/message text), if any. */
+  note: string | null;
   type: string;
   source: string;
   sizeBytes: number | null;
@@ -204,6 +206,7 @@ function uniqueCandidates(snapshots: readonly ResourceSnapshot[]): RunTraceCandi
         snapshotKeyword: snapshot.keyword,
         index: candidate.index,
         title: candidate.title,
+        note: stringOrNull(candidate.providerPayload["note"]),
         type: candidate.type,
         source: candidate.source,
         sizeBytes: numberOrNull(candidate.providerPayload["sizeBytes"]),

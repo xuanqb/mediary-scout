@@ -32,6 +32,7 @@ export const TGTO_DEFAULT_MAX_POINTS = 0;
 export interface TgtoSearchItem {
   title?: unknown;
   message_text?: unknown;
+  message_body?: unknown;
   remark?: unknown;
   slug?: unknown;
   source?: unknown;
@@ -318,13 +319,21 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
       if (linkType !== "share" || !slug || !source) return { reason: "no_share_ref" };
     }
 
-    const title = candidateTitle(item);
+    // Upstream's free-text fields say what the title/spec cannot: coverage claims
+    // ("全40集"), subtitle language, release group. They go to BOTH the agent and
+    // Jev as one deduped note, and stay verbatim in the payload for later audits.
+    const note = candidateNote(item);
+    const rawTitle = stringValue(item.title);
+    const title = candidateTitle(item, note);
     if (!title) return { reason: "no_title" };
 
     const ref: TgtoCandidateRef | undefined = directMagnet
       ? undefined
       : { slug, source, provider: stringValue(item.provider) || "115" };
     const datetime = stringValue(item.published_at).slice(0, 10);
+    const remark = stringValue(item.remark).trim();
+    const messageText = stringValue(item.message_text).trim();
+    const messageBody = stringValue(item.message_body).trim();
 
     return {
       candidate: {
@@ -335,7 +344,13 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
         type: directMagnet ? "magnet" : "115",
         source: "tgto",
         providerPayload: {
-          title: stringValue(item.title) || title,
+          title: rawTitle || title,
+          // A title-less row falls back to the note AS its title — repeating it as
+          // a note would only make the agent read the same line twice.
+          ...(rawTitle && note ? { note } : {}),
+          ...(remark ? { remark } : {}),
+          ...(messageText ? { messageText } : {}),
+          ...(messageBody ? { messageBody } : {}),
           // 磁力直接带链接；分享链故意留空，转存时由 resolver 调 copy-link。
           ...(directMagnet ? { url: shareUrl, ...(infoHashOf(shareUrl) ? { infoHash: infoHashOf(shareUrl) } : {}) } : {}),
           ...(ref ? { [TGTO_PAYLOAD_KEY]: ref, targetProvider: "115" } : {}),
@@ -391,14 +406,35 @@ export function tgtoRefOf(candidate: ResourceCandidate): TgtoCandidateRef | null
   return { slug, source, provider };
 }
 
-function candidateTitle(item: TgtoSearchItem): string {
-  const base =
-    stringValue(item.title) || stringValue(item.message_text) || stringValue(item.remark);
+/** Structured episode numbers are deliberately NOT part of a candidate: upstream
+ *  regex-extracts them and gets them wrong often enough to mislead selection. The
+ *  free-text note is the only coverage statement the agent/Jev see. */
+function candidateTitle(item: TgtoSearchItem, note: string): string {
+  const base = stringValue(item.title) || note;
   const spec = stringValue(item.resource_specification);
-  const episode = episodeLabel(item.episode);
   const subtitles = subtitleLabel(item);
   const size = stringValue(item.size);
-  return [base, spec, episode, subtitles, size].filter((part) => part.length > 0).join(" · ");
+  return [base, spec, subtitles, size].filter((part) => part.length > 0).join(" · ");
+}
+
+export const TGTO_NOTE_MAX_CHARS = 200;
+
+/** One deduped note out of the three free-text fields the upstream mirrors into
+ *  each other. Whitespace is collapsed so the note stays one line; identical
+ *  (case-insensitive) fragments keep only their first, original spelling. */
+export function candidateNote(item: TgtoSearchItem): string {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const raw of [item.remark, item.message_text, item.message_body]) {
+    const text = stringValue(raw).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const key = text.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    parts.push(text);
+  }
+  const note = parts.join("；");
+  return note.length <= TGTO_NOTE_MAX_CHARS ? note : `${note.slice(0, TGTO_NOTE_MAX_CHARS)}…`;
 }
 
 /** 「字幕:简中/繁中(内封)」——质量判断之外，中字语言与内封/外挂也是选片依据。 */
@@ -408,20 +444,6 @@ function subtitleLabel(item: TgtoSearchItem): string {
   if (languages.length === 0 && types.length === 0) return "";
   const language = languages.length > 0 ? languages.join("/") : "字幕";
   return `字幕:${language}${types.length > 0 ? `(${types.join("/")})` : ""}`;
-}
-
-/** 集号标记（S01E01-E08）。season_num 缺失时退回上游的原始文本（re0 的 "E01 - E08"）。 */
-function episodeLabel(raw: unknown): string {
-  const ep = asRecord(raw);
-  const kind = stringValue(ep["kind"]);
-  if (!kind || kind === "none") return "";
-  const season = numberOrNull(ep["season_num"]);
-  const first = numberOrNull(ep["episode_num"]);
-  const last = numberOrNull(ep["end_episode_num"]);
-  if (first === null) return stringValue(ep["source_text"]).trim();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const prefix = season === null ? "" : `S${pad(season)}`;
-  return last !== null && last !== first ? `${prefix}E${pad(first)}-E${pad(last)}` : `${prefix}E${pad(first)}`;
 }
 
 /** "81.10GB" / "896.57M" / "4.39G" → bytes. Unknown shape → 0 (the V2 view treats
@@ -522,8 +544,4 @@ function stringValue(value: unknown): string {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function numberOrNull(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
