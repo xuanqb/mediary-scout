@@ -173,23 +173,55 @@ describe("TgtoResourceProvider", () => {
     ]);
   });
 
-  it("sends tmdb identity + season and does not send season for a multi-season task", async () => {
+  it("sends tmdb identity but never a season", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const p = provider(async (_url, init) => {
       bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
       return okResponse([]);
     });
+    // A single-season task used to send season:1 — Tgto silently drops shares
+    // whose title carries no season tag (the only 115 hit for 后会友期), so the
+    // season must be left out even for a one-season scope.
     await p.search({
       keyword: "怪奇物语",
       context: { title: "怪奇物语", tmdbId: 66732, mediaType: "tv", year: 2016, seasons: [1] },
     });
-    expect(bodies[0]).toMatchObject({ title: "怪奇物语", tmdb_id: 66732, media_type: "tv", year: 2016, season: 1, provider: "115" });
+    expect(bodies[0]).toMatchObject({
+      title: "怪奇物语",
+      tmdb_id: 66732,
+      media_type: "tv",
+      year: 2016,
+    });
+    // Target filtering happens locally (supported_targets must include 115);
+    // asking Tgto to filter too only risks dropping valid results.
+    expect(bodies[0]).not.toHaveProperty("provider");
+    expect(bodies[0]).not.toHaveProperty("season");
 
     await p.search({
       keyword: "怪奇物语",
       context: { title: "怪奇物语", tmdbId: 66732, mediaType: "tv", seasons: [1, 2] },
     });
     expect(bodies[1]).not.toHaveProperty("season");
+  });
+
+  it("searches the requested keyword, not the canonical title (Tgto ignores aliases)", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const p = provider(async (_url, init) => {
+      bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
+      return okResponse([]);
+    });
+    await p.search({
+      keyword: "再见朋友",
+      context: {
+        title: "后会友期",
+        tmdbId: 338938,
+        mediaType: "tv",
+        seasons: [1],
+        aliases: ["再见朋友"],
+      },
+    });
+    expect(bodies[0]).toMatchObject({ title: "再见朋友", tmdb_id: 338938 });
+    expect(bodies[0]).not.toHaveProperty("aliases");
   });
 
   it("does not query upstream when the drive is not 115", async () => {

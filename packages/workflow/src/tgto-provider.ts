@@ -223,23 +223,28 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
     }
 
     const context = input.context;
-    const title = context?.title?.trim() || keyword;
-    const seasons = context?.seasons ?? [];
-    // 多季任务不要传 season：re0 的整包候选带季集标记，传单个季会把别的季过滤掉。
-    const season = seasons.length === 1 ? seasons[0] : undefined;
+    // Tgto 的 title 是要搜的字面词，不是作品规范名：它不会拿 aliases 兜底
+    // （实测传 aliases 仍只按 title 搜，响应里连别名都不回）。所以必须用 agent
+    // 这一次的关键词，否则「再见朋友」这类别名搜索永远到不了 Tgto。
+    //
+    // 也不要传 season：re0 的整包/综艺候选经常没有季集标记，传单个季会把唯一
+    // 的结果滤成 0（实测《后会友期》season:1=0，不传=1）。季节匹配交给 agent：
+    // 候选标题里带 SxxEyy，选片阶段再对齐。
+    //
+    // 不传 provider：它只是目标端过滤，本地已经按 supported_targets 只收 115
+    // （见 toCandidateOutcome），多一层过滤只会误伤；copy-link 时仍用
+    // targetProvider:"115"。网页端搜索也是传空。
+    const body: Record<string, unknown> = {
+      title: keyword,
+      sources: [...this.sources],
+      ...(context?.tmdbId ? { tmdb_id: context.tmdbId } : {}),
+      ...(context?.mediaType ? { media_type: context.mediaType } : {}),
+      ...(context?.year ? { year: context.year } : {}),
+    };
 
     let data: TgtoSearchData;
     try {
-      data = await this.client.searchResources({
-        title,
-        provider: "115",
-        sources: [...this.sources],
-        ...(context?.tmdbId ? { tmdb_id: context.tmdbId } : {}),
-        ...(context?.mediaType ? { media_type: context.mediaType } : {}),
-        ...(context?.year ? { year: context.year } : {}),
-        ...(context?.aliases && context.aliases.length > 0 ? { aliases: context.aliases } : {}),
-        ...(season === undefined ? {} : { season }),
-      });
+      data = await this.client.searchResources(body);
     } catch (error) {
       return emptySnapshot(snapshotId, keyword, this.now(), classifySourceFailure(error));
     }
