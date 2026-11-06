@@ -45,4 +45,22 @@ describe("syncSeasonNeed — 应有 vs 实有(DB marks) = 缺什么 (no 115 scan
     expect(result.missing).toEqual(["S01E01", "S01E02", "S01E03"]);
     expect(result.obtained).toEqual([]);
   });
+
+  it("a per-season start episode moves the should-exist floor (从第 3 集起)", () => {
+    const result = syncSeasonNeed({
+      seasons: [{ seasonNumber: 1, latestAiredEpisode: 5, startEpisode: 3 }],
+      obtained: ["S01E02", "S01E04"],
+    });
+    // E01/E02 are out of scope: E02 is neither missing nor counted as obtained.
+    expect(result.missing).toEqual(["S01E03", "S01E05"]);
+    expect(result.obtained).toEqual(["S01E04"]);
+  });
+
+  it("a start episode past the aired cursor asks for nothing yet", () => {
+    const result = syncSeasonNeed({
+      seasons: [{ seasonNumber: 1, latestAiredEpisode: 5, startEpisode: 9 }],
+      obtained: [],
+    });
+    expect(result.missing).toEqual([]);
+  });
 });

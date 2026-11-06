@@ -33,8 +33,10 @@ import type { SearchProfile } from "./search-profile.js";
  */
 export interface V2WorkflowSeason {
   seasonNumber: number;
-  /** Aired up to this episode (should-exist = E01..latestAiredEpisode). */
+  /** Aired up to this episode (should-exist = start..latestAiredEpisode). */
   latestAiredEpisode: number;
+  /** First episode the subscription covers (absent = 1). */
+  startEpisode?: number;
 }
 
 export interface RunAcquisitionV2WorkflowRequest {
@@ -176,6 +178,7 @@ export async function runAcquisitionV2Workflow(
   const seasonsForSync = request.seasons.map((season) => ({
     seasonNumber: season.seasonNumber,
     latestAiredEpisode: season.latestAiredEpisode,
+    ...(season.startEpisode === undefined ? {} : { startEpisode: season.startEpisode }),
   }));
   const priorObtained = request.priorObtained ?? [];
   const embyObtained = request.embyAvailableEpisodes ?? [];

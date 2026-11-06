@@ -1,6 +1,8 @@
 import {
+  episodeNumberFromCode,
   isUserVisibleWorkflowKind,
   landedSize,
+  seasonStartEpisode,
   type MediaType,
   type NotificationReportStatus,
   type WorkflowKind,
@@ -117,9 +119,15 @@ export async function getActivityView(input: {
     // A replace run covers the whole title; its snapshot is only the lock season's
     // (an S02E01 request would read 「第 1 季」 with S01's missing count).
     const titleLevel = snapshot.workflowRun.kind === "replace_request";
+    const startEpisode = seasonStartEpisode(snapshot.season);
     const missingCount = titleLevel
       ? 0
-      : snapshot.episodes.filter((episode) => episode.airStatus === "aired" && !episode.obtained).length;
+      : snapshot.episodes.filter(
+          (episode) =>
+            episode.airStatus === "aired" &&
+            !episode.obtained &&
+            episodeNumberFromCode(episode.episodeCode) >= startEpisode,
+        ).length;
     const queueIndex = queuedOrder.indexOf(snapshot.workflowRun.id);
     return {
       runId: snapshot.workflowRun.id,

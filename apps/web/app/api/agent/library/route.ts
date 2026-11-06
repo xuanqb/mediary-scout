@@ -1,4 +1,8 @@
 import { connection, NextResponse, type NextRequest } from "next/server";
+import {
+  episodeNumberFromCode,
+  seasonStartEpisode,
+} from "@media-track/workflow";
 import { agentApiGuard } from "../../../../lib/agent-api/guard";
 import { getOwnerAccountId } from "../../../../lib/agent-api/owner";
 import { getWorkflowRepository } from "../../../../lib/workflow-runtime";
@@ -18,8 +22,11 @@ export async function GET(request: NextRequest) {
   );
 
   const items = states.map((state) => {
+    const startEpisode = seasonStartEpisode(state.season);
+    const inScope = (episode: { episodeCode: string }) =>
+      episodeNumberFromCode(episode.episodeCode) >= startEpisode;
     const airedMissing = state.episodes.filter(
-      (episode) => episode.airStatus === "aired" && !episode.obtained,
+      (episode) => episode.airStatus === "aired" && !episode.obtained && inScope(episode),
     );
     return {
       title: state.title.title,
@@ -29,7 +36,10 @@ export async function GET(request: NextRequest) {
       seasonNumber: state.season.seasonNumber,
       status: state.season.status,
       totalEpisodes: state.season.totalEpisodes,
-      obtainedCount: state.episodes.filter((episode) => episode.obtained).length,
+      startEpisode,
+      obtainedCount: state.episodes.filter(
+        (episode) => episode.obtained && inScope(episode),
+      ).length,
       missingAired: airedMissing.map((episode) => episode.episodeCode),
       connectedStorageId: state.connectedStorageId ?? null,
     };

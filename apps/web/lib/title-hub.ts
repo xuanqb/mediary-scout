@@ -1,5 +1,6 @@
 import {
   createTmdbMetadataProvider,
+  episodeNumberFromCode,
   getStorageBrand,
   getTrackedSeasonStatusView,
   isMovieUnreleased,
@@ -9,6 +10,9 @@ import {
   prepareSeriesTarget,
   queueSeriesInitialization,
   queueTrackingInitialization,
+  seasonAiredInScope,
+  seasonEpisodesInScope,
+  seasonStartEpisode,
   type EpisodeStatusCell,
   type LibraryCategory,
   type MediaTitle,
@@ -51,6 +55,9 @@ export interface TitleHubSeason {
   seasonNumber: number;
   totalEpisodes: number;
   latestAiredEpisode: number;
+  /** First episode this subscription covers (1 when unset). Earlier episodes
+   *  are out of scope and render 未订阅. */
+  startEpisode: number;
   tracked: boolean;
   /** TrackedSeason status when tracked. */
   status: "active" | "completed" | null;
@@ -303,7 +310,9 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
       });
       const totalEpisodes = tracked.season.totalEpisodes;
       const latestAiredEpisode = tracked.season.latestAiredEpisode;
-      const airedCount = Math.min(latestAiredEpisode, totalEpisodes);
+      const startEpisode = seasonStartEpisode(tracked.season);
+      const airedCount = seasonAiredInScope(tracked.season);
+      // view.obtainedCount is already restricted to the subscription range.
       const obtainedCount = view?.obtainedCount ?? 0;
       const allAiredObtained = totalEpisodes > 0 && latestAiredEpisode >= totalEpisodes && obtainedCount >= airedCount;
       const allCompleted = seasonGroup.every((s) => s.season.status === "completed");
@@ -311,6 +320,7 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
         seasonNumber,
         totalEpisodes,
         latestAiredEpisode,
+        startEpisode,
         tracked: true,
         status: allCompleted || allAiredObtained ? "completed" : "active",
         obtainedCount,
@@ -324,6 +334,7 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
         seasonNumber,
         totalEpisodes: targetSeason.totalEpisodes,
         latestAiredEpisode: targetSeason.latestAiredEpisode,
+        startEpisode: 1,
         tracked: false,
         status: null,
         obtainedCount: 0,
@@ -500,9 +511,14 @@ export async function queueSeasonTracking(
   tmdbId: number,
   seasonNumber: number,
   storageId?: string,
+  startEpisode?: number,
 ): Promise<CandidateTrackingRequestResult> {
   const scope = await getActiveWorkspaceScope(storageId);
-  return queueCandidateTracking(`tmdb_tv_${tmdbId}_s${seasonNumber}`, scope.connectedStorageId);
+  return queueCandidateTracking(
+    `tmdb_tv_${tmdbId}_s${seasonNumber}`,
+    scope.connectedStorageId,
+    startEpisode,
+  );
 }
 
 /**
@@ -637,13 +653,18 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       const primary = seasonStates.reduce((best, cur) =>
         cur.season.latestAiredEpisode > best.season.latestAiredEpisode ? cur : best,
       );
-      const seasonAired = Math.min(primary.season.latestAiredEpisode, primary.season.totalEpisodes);
+      // Count only the subscription range: a 从第 N 集起 season's earlier
+      // episodes are not progress and must not read as 有缺集.
+      const startEpisode = seasonStartEpisode(primary.season);
+      const seasonAired = seasonAiredInScope(primary.season);
+      const seasonTotal = seasonEpisodesInScope(primary.season);
       aired += seasonAired;
-      total += primary.season.totalEpisodes;
+      total += seasonTotal;
       const obtainedCodes = new Set<string>();
       const embyOnlyCodes = new Set<string>();
       for (const s of seasonStates) {
         for (const ep of s.episodes) {
+          if (episodeNumberFromCode(ep.episodeCode) < startEpisode) continue;
           if (ep.obtained) obtainedCodes.add(ep.episodeCode);
           else if (ep.availableInEmby) embyOnlyCodes.add(ep.episodeCode);
         }
@@ -653,7 +674,7 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       obtained += seasonObtained;
       covered += seasonCovered;
       const allAiredCovered =
-        primary.season.totalEpisodes > 0 &&
+        seasonTotal > 0 &&
         primary.season.latestAiredEpisode >= primary.season.totalEpisodes &&
         seasonCovered >= seasonAired;
       if (!allAiredCovered && seasonStates.some((s) => s.season.status === "active")) {

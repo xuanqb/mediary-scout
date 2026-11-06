@@ -192,6 +192,8 @@ export interface TvTrackingTargetInput {
   storageDirectoryId?: string;
   metadataProvider: TmdbMetadataProvider;
   now?: Date;
+  /** 1-based first episode this subscription covers (absent = 1). */
+  startEpisode?: number;
 }
 
 export interface PreparedTrackingTarget {
@@ -460,6 +462,15 @@ export async function prepareTrackingTarget(input: TvTrackingTargetInput): Promi
     input.now ?? new Date(),
   );
   const latestAiredSource: LatestAiredSource = "metadata";
+  // A start episode past the season's end is meaningless; clamp to the known
+  // count so the stored subscription range is always valid.
+  const requestedStart = input.startEpisode;
+  const startEpisode =
+    requestedStart !== undefined && Number.isInteger(requestedStart) && requestedStart > 1
+      ? totalEpisodes > 0
+        ? Math.min(requestedStart, totalEpisodes)
+        : requestedStart
+      : 1;
 
   return {
     title: {
@@ -490,6 +501,7 @@ export async function prepareTrackingTarget(input: TvTrackingTargetInput): Promi
       totalEpisodes,
       latestAiredEpisode,
       latestAiredSource,
+      ...(startEpisode > 1 ? { startEpisode } : {}),
     },
     // Quality preference NEVER enters the keyword (search-methodology law): it
     // filters out title matches and drifts to same-quality wrong works. Quality

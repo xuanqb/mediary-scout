@@ -949,6 +949,16 @@ p {
   opacity: 0.6;
 }
 
+/* 未订阅: before the subscription's start episode — deliberately out of scope.
+   Dimmer than 未播 and without a "gap" affordance; it is not something the
+   patrol will ever fill. */
+.episode-cell.not-subscribed {
+  border-color: rgba(255, 255, 255, 0.06);
+  border-style: dashed;
+  color: var(--text-muted);
+  opacity: 0.35;
+}
+
 /* 待换: a user asked for this episode to be replaced and no new file has landed yet
    (the old one is still there). Added on top of the cell's state class with the same
    specificity, so these rules must come after EVERY state rule above — unaired and
@@ -2407,6 +2417,47 @@ li.hub-season-row.untracked {
   font-size: 14.5px;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.season-scope-note {
+  margin-left: 7px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* Untracked row: "从第 N 集起" picker + the 获取 button as ONE grid cell so the
+   season row keeps its six columns. */
+.season-request-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.season-start-episode {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.season-start-episode input {
+  width: 52px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg-raised);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+
+.season-start-episode input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .season-cell-count {

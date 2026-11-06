@@ -2,6 +2,7 @@ import { normalizeScope, type WorkflowScope } from "./workflow-scope.js";
 import {
   DEFAULT_ACCOUNT_ID,
   episodeNumberFromCode,
+  seasonStartEpisode,
   type AirStatus,
   type CrossDriveEpisodeOwnership,
   type EpisodeState,
@@ -14,6 +15,8 @@ export type EpisodeDisplayState =
   | "provider_ahead"
   | "in_emby"
   | "missing_aired"
+  /** Before the subscription's start episode: deliberately not acquired. */
+  | "not_subscribed"
   | "unaired"
   | "unknown";
 
@@ -37,6 +40,8 @@ export interface TrackedSeasonStatusView {
   seasonNumber: number;
   totalEpisodes: number;
   latestAiredEpisode: number;
+  /** First episode the subscription covers (1 when unset). */
+  startEpisode: number;
   obtainedEpisodes: string[];
   missingAiredEpisodes: string[];
   providerAheadEpisodes: string[];
@@ -134,14 +139,21 @@ export async function getTrackedSeasonStatusView(input: {
   }
 
   episodes.sort((a, b) => episodeNumberFromCode(a.episodeCode) - episodeNumberFromCode(b.episodeCode));
+  const startEpisode = seasonStartEpisode(state.season);
   const cells = episodes.map((ep) => {
-    const cell = toEpisodeStatusCell(ep);
+    const cell = toEpisodeStatusCell(ep, startEpisode);
     const drives = driveMap.get(ep.episodeCode);
     return drives && drives.length > 0 ? { ...cell, drives } : cell;
   });
   const obtainedEpisodes = cells
     .filter((episode) => episode.obtained)
     .map((episode) => episode.episodeCode);
+  // Coverage counts only the subscription range: episodes before startEpisode
+  // are out of scope, not progress.
+  const inScopeObtained = cells.filter(
+    (episode) =>
+      episode.obtained && episodeNumberFromCode(episode.episodeCode) >= startEpisode,
+  );
   const missingAiredEpisodes = cells
     .filter((episode) => episode.displayState === "missing_aired")
     .map((episode) => episode.episodeCode);
@@ -157,17 +169,18 @@ export async function getTrackedSeasonStatusView(input: {
     seasonNumber: state.season.seasonNumber,
     totalEpisodes: state.season.totalEpisodes,
     latestAiredEpisode: state.season.latestAiredEpisode,
+    startEpisode,
     obtainedEpisodes,
     missingAiredEpisodes,
     providerAheadEpisodes,
-    obtainedCount: obtainedEpisodes.length,
+    obtainedCount: inScopeObtained.length,
     missingAiredCount: missingAiredEpisodes.length,
     inEmbyCount,
     episodes: cells,
   };
 }
 
-function toEpisodeStatusCell(episode: EpisodeState): EpisodeStatusCell {
+function toEpisodeStatusCell(episode: EpisodeState, startEpisode: number): EpisodeStatusCell {
   return {
     episodeCode: episode.episodeCode,
     airStatus: episode.airStatus,
@@ -175,16 +188,22 @@ function toEpisodeStatusCell(episode: EpisodeState): EpisodeStatusCell {
     availableInEmby: episode.availableInEmby === true,
     metadataStatus: episode.metadataStatus,
     verifiedFileCount: episode.verifiedFileIds.length,
-    displayState: displayStateForEpisode(episode),
+    displayState: displayStateForEpisode(episode, startEpisode),
   };
 }
 
-function displayStateForEpisode(episode: EpisodeState): EpisodeDisplayState {
+function displayStateForEpisode(episode: EpisodeState, startEpisode: number): EpisodeDisplayState {
   if (episode.obtained && episode.metadataStatus === "provider_ahead") {
     return "provider_ahead";
   }
   if (episode.obtained) {
     return "obtained";
+  }
+  // Before the subscription start the user deliberately asked NOT to cover this
+  // episode — never a gap, never a patrol target. A real obtained file still
+  // reads as obtained above (the mark is a fact).
+  if (episodeNumberFromCode(episode.episodeCode) < startEpisode) {
+    return "not_subscribed";
   }
   // Emby is a separate library: present there is NOT drive-obtained, but it is
   // also not a gap the patrol should report or re-search.

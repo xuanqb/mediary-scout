@@ -23,6 +23,7 @@ export function RequestSeasonButton({
   seasonNumber,
   storageId,
   titleAcquiring = false,
+  episodeCount,
   demoEntry,
 }: {
   tmdbId: number;
@@ -32,6 +33,8 @@ export function RequestSeasonButton({
   storageId: string | undefined;
   /** Server truth: this title already has an acquisition run in flight. */
   titleAcquiring?: boolean;
+  /** Episodes in this season — enables the "从第 N 集起" range picker. */
+  episodeCount?: number | undefined;
   /** Demo only: recorded to the session library when the scripted playback ends. */
   demoEntry?: DemoAcquisitionEntry | undefined;
 }) {
@@ -39,6 +42,7 @@ export function RequestSeasonButton({
   const lock = useAcquisitionLock();
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState<RequestTrackingActionResult | null>(null);
+  const [startEpisodeText, setStartEpisodeText] = useState("1");
   const scope = `season-${seasonNumber}`;
   const isLocked = isLockedResult(result);
   const mine = lock?.acquiring === scope;
@@ -47,6 +51,16 @@ export function RequestSeasonButton({
   const demo = isDemoModeClient();
   const [demoPlaying, setDemoPlaying] = useState(false);
   const acquiredIds = useDemoAcquiredTmdbIds();
+
+  // Empty/invalid/1 → undefined (the normal "from E01"). Out-of-range values
+  // clamp to the season's episode count.
+  const parsedStartEpisode = (() => {
+    const parsed = Number.parseInt(startEpisodeText, 10);
+    if (!Number.isFinite(parsed) || parsed <= 1) return undefined;
+    return episodeCount !== undefined && episodeCount > 0
+      ? Math.min(parsed, episodeCount)
+      : parsed;
+  })();
 
   if (demo && demoPlaying) {
     return <DemoAcquirePlayback entry={demoEntry} />;
@@ -63,6 +77,24 @@ export function RequestSeasonButton({
 
   return (
     <>
+      {episodeCount !== undefined && episodeCount > 1 ? (
+        <label className="season-start-episode" title="从第几集开始获取；之前的集不获取，也不算缺集">
+          <span>从第</span>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={episodeCount}
+            step={1}
+            value={startEpisodeText}
+            disabled={isPending || isLocked || othersAcquiring}
+            aria-label={`第 ${seasonNumber} 季起始集`}
+            onChange={(event) => setStartEpisodeText(event.target.value)}
+            onBlur={() => setStartEpisodeText(String(parsedStartEpisode ?? 1))}
+          />
+          <span>集起</span>
+        </label>
+      ) : null}
       <button
         className="season-request-button"
         type="button"
@@ -79,7 +111,15 @@ export function RequestSeasonButton({
           startTransition(async () => {
             try {
               const r = await runAction(
-                () => requestSeasonAction({ tmdbId, seasonNumber, storageId }),
+                () =>
+                  requestSeasonAction({
+                    tmdbId,
+                    seasonNumber,
+                    storageId,
+                    ...(parsedStartEpisode === undefined
+                      ? {}
+                      : { startEpisode: parsedStartEpisode }),
+                  }),
                 (msg) => {
                   setResult({ status: "unsupported", message: msg });
                   // 必须 refresh:lock.acquiring 是前端 state,靠重挂载重置。

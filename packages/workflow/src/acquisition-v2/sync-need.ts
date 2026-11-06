@@ -1,4 +1,4 @@
-import { episodeCode, episodeNumberFromCode, episodePartsFromCode } from "../domain.js";
+import { episodeCode, episodeNumberFromCode, episodePartsFromCode, seasonStartEpisode } from "../domain.js";
 
 /**
  * Phase 7b — sync the need. The whole product is a resource-sync problem:
@@ -16,8 +16,11 @@ import { episodeCode, episodeNumberFromCode, episodePartsFromCode } from "../dom
  */
 export interface SeasonSyncInput {
   seasonNumber: number;
-  /** Aired up to this episode (the should-exist range is E01..latestAiredEpisode). */
+  /** Aired up to this episode (the should-exist range is start..latestAiredEpisode). */
   latestAiredEpisode: number;
+  /** First episode this subscription covers (absent = 1). Episodes before it are
+   *  deliberately out of scope: not missing, not searched. */
+  startEpisode?: number;
 }
 
 export interface SeasonNeedResult {
@@ -39,8 +42,10 @@ export function syncSeasonNeed(input: {
   const obtained: string[] = [];
 
   for (const season of input.seasons) {
-    // Should-exist = aired episodes only; unaired are NOT missing.
-    for (let episode = 1; episode <= season.latestAiredEpisode; episode += 1) {
+    // Should-exist = aired episodes inside the SUBSCRIPTION range; unaired and
+    // pre-start episodes are NOT missing.
+    const startEpisode = seasonStartEpisode(season);
+    for (let episode = startEpisode; episode <= season.latestAiredEpisode; episode += 1) {
       const code = episodeCode(season.seasonNumber, episode);
       (have.has(code) ? obtained : missing).push(code);
     }

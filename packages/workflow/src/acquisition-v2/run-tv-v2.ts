@@ -100,6 +100,7 @@ export async function runTvAcquisitionV2(request: RunTvAcquisitionV2Request): Pr
     seasons: request.seasons.map((season) => ({
       seasonNumber: season.seasonNumber,
       latestAiredEpisode: season.latestAiredEpisode,
+      ...(season.startEpisode === undefined ? {} : { startEpisode: season.startEpisode }),
     })),
     qualityPreference: request.seasons[0]!.qualityPreference,
     searchHints: getSearchRecipe(profile),

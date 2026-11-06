@@ -49,6 +49,18 @@ describe("syncSeasonAgainstMetadata", () => {
     expect(result.episodes.find((e) => e.episodeCode === episodeCode(1, 15))?.airStatus).toBe("unaired");
   });
 
+  it("keeps the subscription start episode across a metadata sync", () => {
+    const s = season({ startEpisode: 5, latestAiredEpisode: 12 });
+    const result = syncSeasonAgainstMetadata({
+      season: s,
+      episodes: episodes(s),
+      latestAiredEpisode: 14,
+      totalEpisodes: 16,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.season.startEpisode).toBe(5);
+  });
+
   it("preserves already-obtained episodes across a sync", () => {
     const s = season({ latestAiredEpisode: 12, totalEpisodes: 16 });
     const obtained = Array.from({ length: 12 }, (_, i) => episodeCode(1, i + 1));

@@ -55,6 +55,35 @@ describe("bridgeV2WorkflowToResult — V2 facts → per-season WorkflowResult sh
     expect(result.notifications).toContain(result.notification);
   });
 
+  it("a 从第 N 集起 season keeps startEpisode, completes on its in-scope range, and reports no pre-start gaps", () => {
+    const result = bridgeV2WorkflowToResult({
+      title,
+      mode: "type2",
+      seasons: [
+        {
+          seasonNumber: 1,
+          totalEpisodes: 5,
+          latestAiredEpisode: 5,
+          startEpisode: 3,
+          qualityPreference: "4K",
+        },
+      ],
+      v2: v2Result({
+        missingBefore: ["S01E03", "S01E04", "S01E05"],
+        obtained: ["S01E03", "S01E04", "S01E05"],
+        stillMissing: [],
+      }),
+      workflowRunId: "run-x",
+      now: () => "2026-06-15T00:00:00.000Z",
+    });
+
+    const season = result.seasons[0]!;
+    expect(season.season.startEpisode).toBe(3);
+    expect(season.season.status).toBe("completed");
+    // E01/E02 were never asked for — not gaps in the card.
+    expect(result.notification.report?.realMissing).toEqual([]);
+  });
+
   it("single-season, nothing obtained but had a gap → no_coverage notification", () => {
     const result = bridgeV2WorkflowToResult({
       title,

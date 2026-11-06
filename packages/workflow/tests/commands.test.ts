@@ -47,6 +47,23 @@ describe("queueTrackingInitialization", () => {
       },
     });
   });
+
+  it("starts the subscription at the requested episode (从第 2 集起)", async () => {
+    const repository = new InMemoryWorkflowRepository();
+    const { title, season } = trackedFixture();
+    const result = await queueTrackingInitialization({
+      title,
+      season: { ...season, totalEpisodes: 5, latestAiredEpisode: 3, startEpisode: 2 },
+      keyword: "Show 4K",
+      repository,
+      createWorkflowRunId: () => "run_scoped_type2",
+      now: fixedNow,
+    });
+
+    expect(result.progress.missingAiredEpisodes).toEqual(["S01E02", "S01E03"]);
+    const snapshot = await repository.getWorkflowRunSnapshot("run_scoped_type2");
+    expect(snapshot?.season.startEpisode).toBe(2);
+  });
 });
 
 function trackedFixture(): { title: MediaTitle; season: TrackedSeason } {

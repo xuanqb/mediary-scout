@@ -1,4 +1,8 @@
-import { episodeNumberFromCode } from "./domain.js";
+import {
+  episodeNumberFromCode,
+  seasonEpisodesInScope,
+  seasonStartEpisode,
+} from "./domain.js";
 import type {
   EpisodeState,
   LibraryCategory,
@@ -54,19 +58,28 @@ interface SeasonFacts {
 }
 
 function seasonFacts(season: TrackedSeason, episodes: EpisodeState[]): SeasonFacts {
-  const aired = episodes.filter((episode) => episode.airStatus === "aired");
+  // Judge only the subscription range: a 从第 N 集起 season legitimately lacks
+  // the episodes before N — they are not gaps and must not be reported as 缺集.
+  const startEpisode = seasonStartEpisode(season);
+  const inScope = (episode: EpisodeState) =>
+    episodeNumberFromCode(episode.episodeCode) >= startEpisode;
+  const aired = episodes.filter(
+    (episode) => episode.airStatus === "aired" && inScope(episode),
+  );
   // Episodes Emby already has are not gaps to report (they are deliberately not
   // marked obtained — that state means drive-verified).
   const realMissing = aired
     .filter((episode) => !episode.obtained && !episode.availableInEmby)
     .map((episode) => shortCode(episode.episodeCode));
-  const obtained = episodes.filter((episode) => episode.obtained);
+  const obtained = episodes.filter((episode) => episode.obtained && inScope(episode));
   const seasonFinished = season.latestAiredEpisode >= season.totalEpisodes;
-  const fullyObtained = seasonFinished && realMissing.length === 0 && obtained.length >= season.totalEpisodes;
-  const maxObtainedEpisode = obtained.reduce(
-    (max, episode) => Math.max(max, episodeNumberFromCode(episode.episodeCode)),
-    0,
-  );
+  const fullyObtained =
+    seasonFinished &&
+    realMissing.length === 0 &&
+    obtained.length >= seasonEpisodesInScope(season);
+  const maxObtainedEpisode = episodes
+    .filter((episode) => episode.obtained)
+    .reduce((max, episode) => Math.max(max, episodeNumberFromCode(episode.episodeCode)), 0);
   const providerAhead = maxObtainedEpisode > season.latestAiredEpisode;
   return { realMissing, seasonFinished, fullyObtained, maxObtainedEpisode, providerAhead };
 }
@@ -158,7 +171,11 @@ export function buildSeasonReport(input: SeasonReportInput): NotificationReport 
   let lines: string[];
   if (fullyObtained) {
     status = "complete";
-    lines = [`全 ${input.season.totalEpisodes} 集已完整获取，不再追踪`];
+    const startEpisode = seasonStartEpisode(input.season);
+    lines =
+      startEpisode > 1
+        ? [`第 ${startEpisode} 集起共 ${seasonEpisodesInScope(input.season)} 集已完整获取，不再追踪`]
+        : [`全 ${input.season.totalEpisodes} 集已完整获取，不再追踪`];
   } else if (realMissing.length > 0) {
     status = "partial";
     lines = newlyObtained.length > 0 ? ["本次有新增，仍有已播集数待补"] : ["已获取部分已播集，仍有缺集待补"];

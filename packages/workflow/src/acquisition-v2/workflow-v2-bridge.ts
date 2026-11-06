@@ -2,6 +2,8 @@ import {
   createEpisodeStates,
   episodeNumberFromCode,
   episodePartsFromCode,
+  seasonEpisodesInScope,
+  seasonStartEpisode,
   type AgentDecision,
   type AuditEvent,
   type EpisodeState,
@@ -51,6 +53,9 @@ export interface V2BridgeSeasonIntent {
   totalEpisodes: number;
   latestAiredEpisode: number;
   qualityPreference: string;
+  /** First episode the subscription covers (absent = 1). Episodes before it are
+   *  out of scope: never counted as missing and never block completion. */
+  startEpisode?: number;
   /** Persisted status of the season, if any. IGNORED for the completed decision:
    *  bridgeSeason recomputes status purely from the obtained facts (a season is
    *  completed iff fully acquired), so a stale "completed" never sticks a season
@@ -203,11 +208,12 @@ function bridgeSeason(input: {
   }
 
   // A season is "completed" ONLY when it is actually fully ACQUIRED — every
-  // aired episode obtained and the obtained count covering the whole season —
-  // never merely because every episode has AIRED. A 完结 (fully-aired) drama
-  // whose acquisition left gaps must stay "active" so the daily patrol keeps
-  // filling it; grading it "completed" on airing alone made the patrol skip it
-  // forever (这一秒过火 缺 1-13, 永不消逝的电波 缺全集, 醒来 缺 21).
+  // aired episode in the SUBSCRIPTION range obtained and the obtained count
+  // covering the whole in-scope season — never merely because every episode has
+  // AIRED. (A subscription that starts at E11 legitimately has E01–E10 absent.)
+  // A 完结 (fully-aired) drama whose acquisition left gaps must stay "active" so
+  // the daily patrol keeps filling it; grading it "completed" on airing alone
+  // made the patrol skip it forever (这一秒过火 缺 1-13, 永不消逝的电波 缺全集, 醒来 缺 21).
   //
   // intent.status is deliberately NOT trusted here: this bridge is the sole
   // post-creation writer of season.status, so it recomputes from the obtained
@@ -217,11 +223,19 @@ function bridgeSeason(input: {
   // promises ("only the finale — all obtained — graduates it to completed")
   // happens here: an active season that becomes fully obtained turns completed
   // so the patrol stops re-sweeping a finished show and the library drops 追更中.
+  const startEpisode = seasonStartEpisode(intent);
+  const inScope = (code: string) => {
+    const number = episodeNumberFromCode(code);
+    return number >= startEpisode && number <= intent.totalEpisodes;
+  };
   const fullyAired = intent.totalEpisodes > 0 && intent.latestAiredEpisode >= intent.totalEpisodes;
   const fullyObtained =
     fullyAired &&
-    episodes.filter((episode) => episode.airStatus === "aired").every((episode) => episode.obtained) &&
-    episodes.filter((episode) => episode.obtained).length >= intent.totalEpisodes;
+    episodes
+      .filter((episode) => episode.airStatus === "aired" && inScope(episode.episodeCode))
+      .every((episode) => episode.obtained) &&
+    episodes.filter((episode) => episode.obtained && inScope(episode.episodeCode)).length >=
+      seasonEpisodesInScope(intent);
   const status: SeasonStatus = fullyObtained ? "completed" : "active";
 
   const season: TrackedSeason = {
@@ -234,6 +248,7 @@ function bridgeSeason(input: {
     totalEpisodes: intent.totalEpisodes,
     latestAiredEpisode: intent.latestAiredEpisode,
     latestAiredSource: "metadata",
+    ...(startEpisode > 1 ? { startEpisode } : {}),
   };
 
   return { season, episodes };

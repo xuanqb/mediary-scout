@@ -99,6 +99,35 @@ export interface TrackedSeason {
   totalEpisodes: number;
   latestAiredEpisode: number;
   latestAiredSource: LatestAiredSource;
+  /** First episode this subscription covers (1-based, absent = 1). Set when the
+   *  user asks to acquire/追更 from a specific episode (e.g. 从第 11 集开始):
+   *  earlier episodes are OUT of scope — never searched, never counted as 缺集,
+   *  and they do not block the season from completing. */
+  startEpisode?: number;
+}
+
+/** Normalized first episode of a season's subscription (absent/invalid → 1). */
+export function seasonStartEpisode(season: { startEpisode?: number }): number {
+  const start = season.startEpisode;
+  return start !== undefined && Number.isInteger(start) && start > 1 ? start : 1;
+}
+
+/** Episodes the subscription covers across the whole season (start..total). */
+export function seasonEpisodesInScope(input: {
+  startEpisode?: number;
+  totalEpisodes: number;
+}): number {
+  return Math.max(0, input.totalEpisodes - seasonStartEpisode(input) + 1);
+}
+
+/** Aired episodes the subscription covers (start..latest aired, capped by total). */
+export function seasonAiredInScope(input: {
+  startEpisode?: number;
+  latestAiredEpisode: number;
+  totalEpisodes: number;
+}): number {
+  const aired = Math.min(input.latestAiredEpisode, input.totalEpisodes);
+  return Math.max(0, aired - seasonStartEpisode(input) + 1);
 }
 
 export interface EpisodeState {
@@ -512,6 +541,8 @@ export interface AcquisitionSeasonScope {
   seasonNumber: number;
   totalEpisodes: number;
   latestAiredEpisode: number;
+  /** First episode this subscription covers (absent = 1). */
+  startEpisode?: number;
 }
 
 /** A file in a (recursively listed) provider package tree: path + handle + size. */

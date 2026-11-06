@@ -1,6 +1,8 @@
 import {
   createEpisodeStates,
+  episodeNumberFromCode,
   movieAnchorSeason,
+  seasonStartEpisode,
   type AcquisitionSeasonScope,
   type EpisodeState,
   type MediaTitle,
@@ -147,6 +149,7 @@ function staleStartedBefore(nowIso: string, timeoutMs: number | undefined): stri
 }
 
 function summarizeEpisodeProgress(season: TrackedSeason, episodes: EpisodeState[]): EpisodeProgressSummary {
+  const startEpisode = seasonStartEpisode(season);
   return {
     totalEpisodes: season.totalEpisodes,
     latestAiredEpisode: season.latestAiredEpisode,
@@ -157,7 +160,12 @@ function summarizeEpisodeProgress(season: TrackedSeason, episodes: EpisodeState[
       .filter((episode) => episode.obtained && episode.metadataStatus === "provider_ahead")
       .map((episode) => episode.episodeCode),
     missingAiredEpisodes: episodes
-      .filter((episode) => episode.airStatus === "aired" && !episode.obtained)
+      .filter(
+        (episode) =>
+          episode.airStatus === "aired" &&
+          !episode.obtained &&
+          episodeNumberFromCode(episode.episodeCode) >= startEpisode,
+      )
       .map((episode) => episode.episodeCode),
   };
 }
@@ -209,6 +217,7 @@ export async function queueSeriesInitialization(input: {
     totalEpisodes: firstSeason.totalEpisodes,
     latestAiredEpisode: firstSeason.latestAiredEpisode,
     latestAiredSource: "metadata",
+    ...(firstSeason.startEpisode === undefined ? {} : { startEpisode: firstSeason.startEpisode }),
   };
 
   const reservation = await input.repository.reserveWorkflowRun({

@@ -1,5 +1,8 @@
 import {
   DEFAULT_ACCOUNT_ID,
+  episodeNumberFromCode,
+  seasonAiredInScope,
+  seasonStartEpisode,
   type AcquisitionSeasonScope,
   type AuditEvent,
   type EpisodeCopy,
@@ -636,6 +639,17 @@ async function persistSingleSeason(input: {
   });
 }
 
+/** Aired-but-missing episodes inside the subscription range (progress hint). */
+function inScopeAiredMissingCount(season: TrackedSeason, episodes: EpisodeState[]): number {
+  const start = seasonStartEpisode(season);
+  return episodes.filter(
+    (episode) =>
+      episode.airStatus === "aired" &&
+      !episode.obtained &&
+      episodeNumberFromCode(episode.episodeCode) >= start,
+  ).length;
+}
+
 export async function runType2InitializationV2AndPersist(
   input: TvV2Common & { season: TrackedSeason },
 ): Promise<BridgedV2Result> {
@@ -648,6 +662,9 @@ export async function runType2InitializationV2AndPersist(
         seasonNumber: input.season.seasonNumber,
         totalEpisodes: input.season.totalEpisodes,
         latestAiredEpisode: input.season.latestAiredEpisode,
+        ...(input.season.startEpisode === undefined
+          ? {}
+          : { startEpisode: input.season.startEpisode }),
         qualityPreference: input.season.qualityPreference,
         status: input.season.status,
       },
@@ -665,7 +682,7 @@ export async function runType2InitializationV2AndPersist(
     onProgress: progressAndTraceSink({
       repository: input.repository,
       workflowRunId: input.workflowRun.id,
-      neededHint: Math.min(input.season.latestAiredEpisode, input.season.totalEpisodes),
+      neededHint: seasonAiredInScope(input.season),
       storage: input.storage,
     }),
     ...passthrough(input),
@@ -700,6 +717,9 @@ export async function runType3MonitoringV2AndPersist(
         seasonNumber: input.season.seasonNumber,
         totalEpisodes: input.season.totalEpisodes,
         latestAiredEpisode: input.season.latestAiredEpisode,
+        ...(input.season.startEpisode === undefined
+          ? {}
+          : { startEpisode: input.season.startEpisode }),
         qualityPreference: input.season.qualityPreference,
         status: input.season.status,
       },
@@ -719,7 +739,7 @@ export async function runType3MonitoringV2AndPersist(
     onProgress: progressAndTraceSink({
       repository: input.repository,
       workflowRunId: input.workflowRun.id,
-      neededHint: input.episodes.filter((episode) => episode.airStatus === "aired" && !episode.obtained).length,
+      neededHint: inScopeAiredMissingCount(input.season, input.episodes),
       storage: input.storage,
     }),
     ...passthrough(input),
@@ -756,6 +776,7 @@ export async function runSeriesInitializationV2AndPersist(
       seasonNumber: season.seasonNumber,
       totalEpisodes: season.totalEpisodes,
       latestAiredEpisode: season.latestAiredEpisode,
+      ...(season.startEpisode === undefined ? {} : { startEpisode: season.startEpisode }),
       qualityPreference: quality,
     })),
     categoryParentId: input.categoryParentId,
@@ -772,7 +793,7 @@ export async function runSeriesInitializationV2AndPersist(
       repository: input.repository,
       workflowRunId: input.workflowRun.id,
       neededHint: input.seasons.reduce(
-        (sum, season) => sum + Math.min(season.latestAiredEpisode, season.totalEpisodes),
+        (sum, season) => sum + seasonAiredInScope(season),
         0,
       ),
       storage: input.storage,
@@ -896,10 +917,18 @@ export async function runReplaceRequestV2AndPersist(
   const priorObtained = input.seasons.flatMap((entry) =>
     entry.episodes.filter((episode) => episode.obtained).map((episode) => episode.episodeCode),
   );
-  const missing = input.seasons.reduce(
-    (sum, entry) => sum + entry.episodes.filter((episode) => episode.airStatus === "aired" && !episode.obtained).length,
-    0,
-  );
+  const missing = input.seasons.reduce((sum, entry) => {
+    const startEpisode = seasonStartEpisode(entry.season);
+    return (
+      sum +
+      entry.episodes.filter(
+        (episode) =>
+          episode.airStatus === "aired" &&
+          !episode.obtained &&
+          episodeNumberFromCode(episode.episodeCode) >= startEpisode,
+      ).length
+    );
+  }, 0);
   const bridged = await runTvAcquisitionV2({
     title: input.title,
     mode: "replace",
@@ -907,6 +936,7 @@ export async function runReplaceRequestV2AndPersist(
       seasonNumber: season.seasonNumber,
       totalEpisodes: season.totalEpisodes,
       latestAiredEpisode: season.latestAiredEpisode,
+      ...(season.startEpisode === undefined ? {} : { startEpisode: season.startEpisode }),
       qualityPreference: season.qualityPreference,
       status: season.status,
     })),
@@ -1076,6 +1106,7 @@ export async function runStagingRecoveryV2AndPersist(
       seasonNumber: season.seasonNumber,
       totalEpisodes: season.totalEpisodes,
       latestAiredEpisode: season.latestAiredEpisode,
+      ...(season.startEpisode === undefined ? {} : { startEpisode: season.startEpisode }),
       qualityPreference: season.qualityPreference,
       status: season.status,
     })),

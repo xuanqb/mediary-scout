@@ -67,6 +67,54 @@ describe("getTrackedSeasonStatusView", () => {
     ]);
   });
 
+  it("marks episodes before the subscription start as 未订阅 and excludes them from coverage", async () => {
+    const repository = new InMemoryWorkflowRepository();
+    const { title, season } = fixture();
+    const scoped: TrackedSeason = { ...season, startEpisode: 2 };
+    const episodes = [
+      ...createEpisodeStates({
+        trackedSeasonId: scoped.id,
+        seasonNumber: scoped.seasonNumber,
+        totalEpisodes: scoped.totalEpisodes,
+        latestAiredEpisode: scoped.latestAiredEpisode,
+      }).map((episode) =>
+        episode.episodeCode === "S01E02"
+          ? { ...episode, obtained: true, verifiedFileIds: ["file_2"] }
+          : episode,
+      ),
+      providerAheadEpisode(scoped.id),
+    ];
+    await repository.saveWorkflowRunSnapshot({
+      title,
+      season: scoped,
+      workflowRun: workflowRun(scoped),
+      episodes,
+      resourceSnapshots: [],
+      decisions: [],
+      transferAttempts: [],
+      notifications: [],
+    });
+
+    const view = await getTrackedSeasonStatusView({
+      repository,
+      trackedSeasonId: scoped.id,
+    });
+
+    expect(view).toMatchObject({
+      startEpisode: 2,
+      obtainedEpisodes: ["S01E02", "S01E04"],
+      missingAiredEpisodes: [],
+      obtainedCount: 2,
+      missingAiredCount: 0,
+    });
+    expect(view?.episodes.map((episode) => [episode.episodeCode, episode.displayState])).toEqual([
+      ["S01E01", "not_subscribed"],
+      ["S01E02", "obtained"],
+      ["S01E03", "unaired"],
+      ["S01E04", "provider_ahead"],
+    ]);
+  });
+
   // 123 醒来 bug (2026-09-04): the same season tracked on two drives. The detail
   // page must show THAT drive's episodes — passing only accountId drops the
   // storage filter and the unscoped lookup returns an arbitrary drive's copy

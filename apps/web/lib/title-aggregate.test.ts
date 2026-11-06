@@ -153,6 +153,22 @@ describe("seasonBadgeState", () => {
       seasonBadgeState(season({ status: "active", obtainedCount: 3, inEmbyCount: 2, latestAiredEpisode: 5 })),
     ).toBe("airing");
   });
+
+  it("judges a 从第 N 集起 season on its subscription range only", () => {
+    // 20 episodes, subscription from E11 → 10 in-scope aired episodes.
+    const scoped = { startEpisode: 11, totalEpisodes: 20, latestAiredEpisode: 20 };
+    expect(seasonBadgeState(season({ ...scoped, status: "completed", obtainedCount: 10 }))).toBe(
+      "complete",
+    );
+    expect(seasonBadgeState(season({ ...scoped, status: "active", obtainedCount: 9 }))).toBe(
+      "missing",
+    );
+    expect(
+      aggregateStateFromSeasons([
+        season({ ...scoped, status: "active", obtainedCount: 10 }),
+      ]),
+    ).toBe("tracking");
+  });
 });
 
 describe("libraryWallState", () => {

@@ -1,3 +1,5 @@
+import { seasonAiredInScope } from "@media-track/workflow";
+
 export type TitleAggregateState = "untracked" | "tracking" | "partial" | "complete";
 
 /**
@@ -7,17 +9,20 @@ export type TitleAggregateState = "untracked" | "tracking" | "partial" | "comple
 export interface AggregateSeasonInput {
   tracked: boolean;
   status: "active" | "completed" | null;
+  /** Obtained episodes INSIDE the subscription range (see startEpisode). */
   obtainedCount: number;
   /** Aired episodes present in Emby only — covered for the missing-badge, but
    *  still not drive-obtained. */
   inEmbyCount?: number;
   latestAiredEpisode: number;
   totalEpisodes: number;
+  /** First episode the subscription covers (absent = 1). */
+  startEpisode?: number;
 }
 
-/** Aired episodes that SHOULD be in storage for this season. */
+/** Aired episodes that SHOULD be in storage for this season (subscription range). */
 function airedEpisodes(season: AggregateSeasonInput): number {
-  return Math.min(season.latestAiredEpisode, season.totalEpisodes);
+  return seasonAiredInScope(season);
 }
 
 export type SeasonBadgeState = "untracked" | "missing" | "airing" | "complete";

@@ -305,6 +305,8 @@ export async function requestSeasonAction(input: {
   // non-primary (e.g. quark) acquisition to the primary drive and the run never
   // shows on the workspace the user is looking at.
   storageId: string | undefined;
+  /** 1-based first episode to acquire for THIS season (absent = from E01). */
+  startEpisode?: number;
 }): Promise<RequestTrackingActionResult> {
   assertNotDemo();
   const preflight = await acquireLlmNotConfigured();
@@ -312,7 +314,12 @@ export async function requestSeasonAction(input: {
     return preflight;
   }
   const { queueSeasonTracking } = await import("../lib/title-hub");
-  const request = await queueSeasonTracking(input.tmdbId, input.seasonNumber, input.storageId);
+  const request = await queueSeasonTracking(
+    input.tmdbId,
+    input.seasonNumber,
+    input.storageId,
+    input.startEpisode,
+  );
   if (request.status === "already_tracked") {
     return { status: "already_tracked", message: "本季已追踪。" };
   }

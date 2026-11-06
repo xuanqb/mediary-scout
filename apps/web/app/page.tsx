@@ -20,7 +20,13 @@ import {
   getRegisteredDriveCount,
   getWorkflowRepository,
 } from "../lib/workflow-runtime";
-import { showHref } from "@media-track/workflow";
+import {
+  episodeNumberFromCode,
+  seasonAiredInScope,
+  seasonEpisodesInScope,
+  seasonStartEpisode,
+  showHref,
+} from "@media-track/workflow";
 import type { SearchCandidateCard, TrackedSeasonState } from "@media-track/workflow";
 
 /** Workspace base path: "/" is the account's primary drive, "/w/<id>" a
@@ -281,19 +287,25 @@ function trackedSummaryLabel(states: TrackedSeasonState[], totalSeasonCount: num
     const primary = group.reduce((best, cur) =>
       cur.season.latestAiredEpisode > best.season.latestAiredEpisode ? cur : best,
     );
+    const startEpisode = seasonStartEpisode(primary.season);
     const obtainedCodes = new Set<string>();
     for (const s of group) {
       for (const ep of s.episodes) {
-        if (ep.obtained) obtainedCodes.add(ep.episodeCode);
+        if (ep.obtained && episodeNumberFromCode(ep.episodeCode) >= startEpisode) {
+          obtainedCodes.add(ep.episodeCode);
+        }
       }
     }
     const totalEpisodes = primary.season.totalEpisodes;
     const latestAired = primary.season.latestAiredEpisode;
-    const airedCount = Math.min(latestAired, totalEpisodes);
+    // Completeness is judged INSIDE the subscription range: a 从第 N 集起 season
+    // never has to contain E01..E(N-1).
+    const inScopeTotal = seasonEpisodesInScope(primary.season);
+    const airedCount = seasonAiredInScope(primary.season);
     const allCompleted =
       group.every((s) => s.season.status === "completed") ||
-      (totalEpisodes > 0 && latestAired >= totalEpisodes && obtainedCodes.size >= airedCount);
-    if (allCompleted && obtainedCodes.size >= totalEpisodes) {
+      (inScopeTotal > 0 && latestAired >= totalEpisodes && obtainedCodes.size >= airedCount);
+    if (allCompleted && obtainedCodes.size >= inScopeTotal) {
       complete.push(seasonNumber);
     } else if (!allCompleted && group.some((s) => s.season.status === "active")) {
       active.push(seasonNumber);

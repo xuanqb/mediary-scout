@@ -103,6 +103,53 @@ describe("TmdbMetadataProvider", () => {
   // it must start "active" — even for a fully-aired (完结) show. Marking it
   // "completed" at track time (aired >= total) makes the patrol skip it forever
   // when the initial acquisition leaves gaps.
+  it("stores the requested start episode, clamped to the season length (从第 N 集起)", async () => {
+    const provider = new TmdbMetadataProvider({
+      readToken: "token",
+      fetchJson: async (url) => {
+        if (url.includes("/tv/500001?")) {
+          return {
+            id: 500001,
+            name: "长剧",
+            original_name: "长剧",
+            first_air_date: "2026-01-01",
+            number_of_episodes: 5,
+            overview: "",
+            poster_path: null,
+            backdrop_path: null,
+            last_episode_to_air: { season_number: 1, episode_number: 5 },
+            seasons: [{ season_number: 1, episode_count: 5 }],
+          };
+        }
+        if (url.includes("/tv/500001/season/1?")) {
+          return {
+            id: 1,
+            season_number: 1,
+            episodes: Array.from({ length: 5 }, (_, index) => ({
+              episode_number: index + 1,
+              name: `Episode ${index + 1}`,
+              air_date: `2026-01-0${index + 1}`,
+            })),
+          };
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    });
+    const base = {
+      tmdbId: 500001,
+      mediaType: "tv" as const,
+      seasonNumber: 1,
+      qualityPreference: "4K",
+      metadataProvider: provider,
+      now: new Date("2026-10-02T00:00:00Z"),
+    };
+
+    expect((await prepareTrackingTarget({ ...base, startEpisode: 3 })).season.startEpisode).toBe(3);
+    // Past the last episode → clamped to the season's length.
+    expect((await prepareTrackingTarget({ ...base, startEpisode: 99 })).season.startEpisode).toBe(5);
+    expect((await prepareTrackingTarget(base)).season.startEpisode).toBeUndefined();
+  });
+
   it("prepares a fully-aired (完结) TV target as active — nothing obtained yet", async () => {
     const provider = new TmdbMetadataProvider({
       readToken: "token",

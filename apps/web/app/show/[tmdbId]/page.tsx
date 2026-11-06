@@ -472,6 +472,7 @@ const EPISODE_STATE_LABEL: Record<EpisodeDisplayState, string> = {
   in_emby: "Emby",
   missing_aired: "缺集",
   provider_ahead: "超前",
+  not_subscribed: "未订阅",
   unaired: "未播",
   unknown: "未知",
 };
@@ -496,8 +497,14 @@ function SeasonRow({
   swap: ReadonlySet<string>;
   demoEntry?: DemoAcquisitionEntry | undefined;
 }) {
-  const total = season.totalEpisodes;
-  const aired = Math.min(season.latestAiredEpisode, total);
+  const startEpisode = season.startEpisode;
+  // The subscription range is start..end; earlier episodes are out of scope, so
+  // the bar and the counts describe only what the user asked to acquire.
+  const total = Math.max(0, season.totalEpisodes - (startEpisode - 1));
+  const aired = Math.max(
+    0,
+    Math.min(season.latestAiredEpisode, season.totalEpisodes) - (startEpisode - 1),
+  );
   // Obtained never exceeds aired for bar purposes (resource-ahead caps at aired).
   const obtained = Math.min(season.obtainedCount, aired);
   const airedPct = total > 0 ? (aired / total) * 100 : 0;
@@ -507,7 +514,10 @@ function SeasonRow({
 
   const rowBody = (
     <>
-      <span className="season-cell-name">第 {season.seasonNumber} 季</span>
+      <span className="season-cell-name">
+        第 {season.seasonNumber} 季
+        {startEpisode > 1 ? <em className="season-scope-note">从第 {startEpisode} 集起</em> : null}
+      </span>
       <span className="season-cell-count">{total} 集</span>
       {badge ? (
         <span className={`hub-badge tone-${badge.tone}`}>{badge.label}</span>
@@ -543,13 +553,16 @@ function SeasonRow({
     return (
       <li className="hub-season-row untracked">
         {rowBody}
-        <RequestSeasonButton
-          tmdbId={tmdbId}
-          seasonNumber={season.seasonNumber}
-          storageId={storageId}
-          titleAcquiring={acquiring}
-          demoEntry={demoEntry}
-        />
+        <span className="season-request-actions">
+          <RequestSeasonButton
+            tmdbId={tmdbId}
+            seasonNumber={season.seasonNumber}
+            storageId={storageId}
+            titleAcquiring={acquiring}
+            episodeCount={season.totalEpisodes}
+            demoEntry={demoEntry}
+          />
+        </span>
       </li>
     );
   }

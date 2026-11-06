@@ -864,7 +864,14 @@ export async function getWorkflowStatusView(
 export async function queueCandidateTracking(
   candidateId: string,
   connectedStorageId?: string | null,
+  startEpisode?: number,
 ): Promise<CandidateTrackingRequestResult> {
+  // Server-side boundary: the client sends the start episode, so only an
+  // integer >= 2 is meaningful; everything else falls back to "from E01".
+  const requestedStart =
+    startEpisode !== undefined && Number.isInteger(startEpisode) && startEpisode > 1
+      ? startEpisode
+      : undefined;
   let accountId: string;
   try {
     accountId = await requireAuthenticatedAccountId();
@@ -901,7 +908,7 @@ export async function queueCandidateTracking(
     };
   }
 
-  const target = await trackingTargetFromCandidateId(candidateId);
+  const target = await trackingTargetFromCandidateId(candidateId, requestedStart);
   if (!target) {
     return {
       status: "unsupported",
@@ -2355,7 +2362,10 @@ async function seedDemoIfEmpty(targetRepository: WorkflowRepository): Promise<vo
   await seedDemoWorkflowRepository(targetRepository);
 }
 
-async function trackingTargetFromCandidateId(candidateId: string): Promise<{
+async function trackingTargetFromCandidateId(
+  candidateId: string,
+  startEpisode?: number,
+): Promise<{
   title: MediaTitle;
   season: TrackedSeason;
   keyword: string;
@@ -2373,6 +2383,7 @@ async function trackingTargetFromCandidateId(candidateId: string): Promise<{
       qualityPreference: defaultQuality(),
       storageDirectoryId: storageDirectoryIdForCandidate(candidateId),
       metadataProvider: createTmdbMetadataProvider(await getTmdbAccesses(getAccountScopedSettings(await getCurrentAccountId()))),
+      ...(startEpisode === undefined ? {} : { startEpisode }),
     });
   }
 
@@ -2380,13 +2391,14 @@ async function trackingTargetFromCandidateId(candidateId: string): Promise<{
   if (!candidate || candidate.mediaType !== "tv") {
     return null;
   }
-  return targetFromSearchCandidate(candidate, parsed.seasonNumber, candidateId);
+  return targetFromSearchCandidate(candidate, parsed.seasonNumber, candidateId, startEpisode);
 }
 
 function targetFromSearchCandidate(
   candidate: MediaSearchCandidate,
   seasonNumber: number,
   candidateId: string,
+  startEpisode?: number,
 ): {
   title: MediaTitle;
   season: TrackedSeason;
@@ -2396,6 +2408,10 @@ function targetFromSearchCandidate(
   if (!season) {
     return null;
   }
+  const start =
+    startEpisode !== undefined && startEpisode > 1
+      ? Math.min(startEpisode, season.episodeCount)
+      : 1;
   const titleId = `tmdb_tv_${candidate.tmdbId}`;
   const title: MediaTitle = {
     id: titleId,
@@ -2420,6 +2436,7 @@ function targetFromSearchCandidate(
     totalEpisodes: season.episodeCount,
     latestAiredEpisode: season.latestAiredEpisode,
     latestAiredSource: "metadata",
+    ...(start > 1 ? { startEpisode: start } : {}),
   };
   return {
     title,

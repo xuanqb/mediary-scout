@@ -181,6 +181,28 @@ describe("getLibraryWall — Emby-covered gaps", () => {
 
     expect((await hub.getLibraryWall()).find((item) => item.tmdbId === 43)?.state).toBe("partial");
   });
+
+  it("counts only the subscription range of a 从第 N 集起 season", async () => {
+    const scoped = title(44, "Scoped");
+    const scopedSeason: TrackedSeason = {
+      ...season(scoped, 1),
+      totalEpisodes: 4,
+      latestAiredEpisode: 4,
+      startEpisode: 3,
+    };
+    await seedSeason(scoped, scopedSeason, [], ["S01E03", "S01E04"]);
+
+    const entry = (await hub.getLibraryWall()).find((item) => item.tmdbId === 44)!;
+
+    // E01/E02 are out of scope: 2/2 in-scope episodes, not 2/4 — and complete.
+    expect(entry).toMatchObject({
+      obtainedEpisodes: 2,
+      totalAiredEpisodes: 2,
+      totalEpisodes: 2,
+      state: "complete",
+      airing: false,
+    });
+  });
 });
 
 describe("getDetailView — the card's type hint owns the TMDB namespace", () => {
