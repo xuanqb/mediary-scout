@@ -3589,6 +3589,52 @@ select.setting-control {
   max-width: 52%;
 }
 
+.trace-drops {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.trace-drops summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  list-style: none;
+}
+.trace-drops summary::-webkit-details-marker { display: none; }
+
+.trace-drops-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 320px;
+  overflow: auto;
+  margin-top: 6px;
+  padding-right: 4px;
+}
+
+.trace-drop-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+}
+.trace-drop-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-soft);
+  word-break: break-word;
+}
+.trace-drop-score {
+  flex: none;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .trace-steps {
   display: flex;
   flex-direction: column;

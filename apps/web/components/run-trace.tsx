@@ -221,6 +221,9 @@ function TraceBody({ trace, backHref }: { trace: RunTrace; backHref: string }) {
         <Chip label="选中" value={trace.summary.selectedCount} suffix="个" />
         <Chip label="弃用" value={trace.summary.rejectedCount} suffix="个" />
         <Chip label="预筛丢弃" value={trace.summary.droppedByIdentity} suffix="个" />
+        {trace.summary.droppedAsNsfw > 0 ? (
+          <Chip label="成人内容丢弃" value={trace.summary.droppedAsNsfw} suffix="个" tone="warn" />
+        ) : null}
         <Chip label="转存成功" value={trace.summary.transferSucceeded} suffix="个" />
         <Chip label="转存失败" value={trace.summary.transferFailed} suffix="个" tone="warn" />
         <Chip label="无缓存副本" value={trace.summary.transferNoChange} suffix="个" />
@@ -299,6 +302,7 @@ function TraceBody({ trace, backHref }: { trace: RunTrace; backHref: string }) {
                       ))}
                     </div>
                   )}
+                  <PrefilterDrops prefilter={search.prefilter} />
                 </div>
               );
             })}
@@ -469,6 +473,54 @@ function PrefilterPill({ prefilter }: { prefilter: NonNullable<RunTrace["searche
   );
 }
 
+/** The dropped candidates are NOT in the snapshot's candidate list (the prefilter
+ *  removed them before the agent saw it), so the summary count alone is opaque.
+ *  Their titles and scores survive in `prefilter.dropped` / `nsfwDropped` /
+ *  `floored` — render those directly. */
+function PrefilterDrops({
+  prefilter,
+}: {
+  prefilter: NonNullable<RunTrace["searches"][number]["prefilter"]> | null;
+}) {
+  if (!prefilter) return null;
+  const dropped = prefilter.dropped;
+  const nsfwDropped = prefilter.nsfwDropped ?? [];
+  const floored = prefilter.floored ?? [];
+  const total = dropped.length + nsfwDropped.length;
+  if (total === 0 && floored.length === 0) return null;
+  return (
+    <details className="trace-drops" open>
+      <summary>
+        <ChevronDown size={11} aria-hidden /> 预筛丢弃 {total} 个
+        {floored.length > 0 ? ` · 结构兜底保留 ${floored.length} 个` : ""}
+      </summary>
+      <div className="trace-drops-body">
+        {nsfwDropped.map((entry) => (
+          <div className="trace-drop-row" key={`nsfw-${entry.id}`}>
+            <span className="trace-pill tone-warn">成人内容</span>
+            <span className="trace-drop-title">{entry.title}</span>
+            <span className="trace-drop-score">nsfw {entry.score.toFixed(2)}</span>
+          </div>
+        ))}
+        {dropped.map((entry) => (
+          <div className="trace-drop-row" key={`drop-${entry.id}`}>
+            <span className="trace-pill tone-warn">相关度低</span>
+            <span className="trace-drop-title">{entry.title}</span>
+            <span className="trace-drop-score">{entry.score.toFixed(2)}</span>
+          </div>
+        ))}
+        {floored.map((entry) => (
+          <div className="trace-drop-row" key={`floor-${entry.id}`}>
+            <span className="trace-pill tone-info">结构兜底保留</span>
+            <span className="trace-drop-title">{entry.title}</span>
+            <span className="trace-drop-score">{entry.score.toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function CandidateRow({
   candidate,
   prefilter,
@@ -620,7 +672,9 @@ function runDiagnostics(trace: RunTrace): string[] {
     out.push("搜索已执行，但所有源都没有返回候选。");
   }
   if (trace.summary.droppedByIdentity > 0) {
-    out.push(`Jev 预筛丢弃了 ${trace.summary.droppedByIdentity} 个候选，评分见候选行。`);
+    out.push(
+      `Jev 预筛丢弃了 ${trace.summary.droppedByIdentity} 个候选，标题和评分见各次搜索下的「预筛丢弃」明细。`,
+    );
   }
   if (trace.summary.droppedAsNsfw > 0) {
     out.push(`另有 ${trace.summary.droppedAsNsfw} 个候选因成人内容被丢弃。`);
