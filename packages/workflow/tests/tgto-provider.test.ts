@@ -143,6 +143,28 @@ describe("TgtoResourceProvider", () => {
     ]);
   });
 
+  it("carries upstream source errors when an empty result is degraded", async () => {
+    const p = provider(async () => ({
+      success: true,
+      data: {
+        items: [],
+        errors: [{ source: "re0", error: "timeout" }, "观影 429"],
+        media_type: "tv",
+        provider: "115",
+      },
+    }));
+    const snapshot = await p.search({ keyword: "后会友期" });
+    expect(snapshot.sourceStats).toEqual([
+      {
+        name: "tgto",
+        status: "degraded",
+        candidates: 0,
+        error: '2 个上游源报错：{"source":"re0","error":"timeout"}；观影 429',
+      },
+    ]);
+    expect(snapshot.sourceHealth?.status).toBe("degraded");
+  });
+
   it("reports kept candidates and omits the filter list when nothing was dropped", async () => {
     const p = provider(async () => okResponse([shareItem(), magnetItem()]));
     const snapshot = await p.search({ keyword: "沙丘" });
@@ -184,6 +206,44 @@ describe("TgtoResourceProvider", () => {
     });
     const snapshot = await p.search({ keyword: "沙丘" });
     expect(snapshot.candidates).toHaveLength(0);
+    expect(snapshot.sourceHealth?.status).toBe("unreachable");
+  });
+
+  it("retries a timed-out search once, then succeeds", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), {
+          name: "TimeoutError",
+        });
+      }
+      return okResponse([shareItem()]);
+    });
+    const snapshot = await p.search({ keyword: "沙丘" });
+    expect(calls).toBe(2);
+    expect(snapshot.candidates).toHaveLength(1);
+    expect(snapshot.sourceHealth?.status).toBe("healthy");
+  });
+
+  it("gives up after a single retry when the source stays down", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      throw Object.assign(new Error("The operation was aborted due to timeout"), {
+        name: "TimeoutError",
+      });
+    });
+    const snapshot = await p.search({ keyword: "沙丘" });
+    expect(calls).toBe(2);
+    expect(snapshot.sourceHealth?.status).toBe("unreachable");
+  });
+
+  it("does not retry a search the upstream explicitly rejected", async () => {
+    const fetchJson = vi.fn(async () => ({ success: false, error: "bad request" }));
+    const p = provider(fetchJson);
+    const snapshot = await p.search({ keyword: "沙丘" });
+    expect(fetchJson).toHaveBeenCalledTimes(1);
     expect(snapshot.sourceHealth?.status).toBe("unreachable");
   });
 });

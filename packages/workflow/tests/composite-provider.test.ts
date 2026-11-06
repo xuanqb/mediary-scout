@@ -84,12 +84,13 @@ describe("CompositeResourceProvider", () => {
           sourceStats: [
             {
               name: "tgto",
-              status: "healthy",
+              status: "degraded",
               candidates: 0,
               filtered: [{ reason: "points_unknown", count: 3 }],
+              error: "1 个上游源报错：re0 timeout",
             },
           ],
-          sourceHealth: { status: "healthy", unhealthySources: [] },
+          sourceHealth: { status: "degraded", unhealthySources: ["tgto"] },
         };
       },
     };
@@ -105,11 +106,33 @@ describe("CompositeResourceProvider", () => {
       { name: "pansou", status: "healthy", candidates: 2 },
       {
         name: "tgto",
-        status: "healthy",
+        status: "degraded",
         candidates: 0,
         filtered: [{ reason: "points_unknown", count: 3 }],
+        error: "1 个上游源报错：re0 timeout",
       },
-      { name: "haisou", status: "unreachable", candidates: 0 },
+      { name: "haisou", status: "unreachable", candidates: 0, error: "haisou down" },
+    ]);
+  });
+
+  it("records why a source failed, so a transient timeout is explainable later", async () => {
+    const timedOut: ResourceProvider = {
+      async search() {
+        throw Object.assign(new Error("The operation was aborted due to timeout"), {
+          name: "TimeoutError",
+        });
+      },
+    };
+    const composite = new CompositeResourceProvider({
+      providers: [
+        { name: "pansou", provider: fakeProvider("pansou", []) },
+        { name: "tgto", provider: timedOut },
+      ],
+    });
+    const snap = await composite.search({ keyword: "x" });
+    expect(snap.sourceStats).toEqual([
+      { name: "pansou", status: "healthy", candidates: 0 },
+      { name: "tgto", status: "unreachable", candidates: 0, error: "请求超时" },
     ]);
   });
 });

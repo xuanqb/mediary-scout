@@ -3,6 +3,7 @@ import type { ResourceCandidate, ResourceSnapshot, ResourceType } from "./domain
 import type { ResourceCandidateLinkResolver, ResourceProvider, ResourceSearchInput } from "./ports.js";
 import {
   classifySourceFailure,
+  hasRecognisedUnreachableCode,
   mergeSourceHealth,
   type SourceStatus,
 } from "./resource-source-health.js";
@@ -20,9 +21,11 @@ import {
  */
 
 export const TGTO_DEFAULT_SOURCES = ["re0", "guanying"] as const;
-/** 上游是多源实时聚合：re0+观影实测 10–21s（SeedHub 单源再 +30s），所以默认
- *  超时要留够余量 —— 25s 会偶发把一次正常搜索误判成 unreachable。 */
-export const TGTO_DEFAULT_TIMEOUT_MS = 50_000;
+/** 上游是多源实时聚合：re0+观影实测 10–21s（SeedHub 单源再 +30s）。30s 留够余量，
+ *  一次超时不会让整次搜索陪卡 50s；搜索是只读幂等，超时/连接失败后再试一次，
+ *  冷启动与瞬时抖动通常第二次就能答（总预算 2×30s，不比原来单次 50s 差多少）。 */
+export const TGTO_DEFAULT_TIMEOUT_MS = 30_000;
+export const TGTO_SEARCH_ATTEMPTS = 2;
 export const TGTO_DEFAULT_COPY_LINK_TIMEOUT_MS = 90_000;
 export const TGTO_DEFAULT_MAX_POINTS = 0;
 
@@ -90,6 +93,17 @@ export interface TgtoCandidateRef {
 
 const TGTO_PAYLOAD_KEY = "tgto";
 
+/** 带状态码的上游错误：搜索重试要靠它区分 5xx（值得重试）与 4xx（重试无用）。 */
+class TgtoHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`tgto upstream HTTP ${status}`);
+    this.name = "TgtoHttpError";
+    this.status = status;
+  }
+}
+
 export class TgtoClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -121,7 +135,22 @@ export class TgtoClient {
     });
   }
 
+  /** 搜索是只读幂等的：超时/连接失败/5xx 时立刻重试一次，避免一次冷启动抖动
+   *  就把整源标成 unreachable（见 TGTO_DEFAULT_TIMEOUT_MS 的注释）。 */
   async searchResources(body: Record<string, unknown>): Promise<TgtoSearchData> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= TGTO_SEARCH_ATTEMPTS; attempt += 1) {
+      try {
+        return await this.searchOnce(body);
+      } catch (error) {
+        lastError = error;
+        if (attempt >= TGTO_SEARCH_ATTEMPTS || !isRetryableSearchError(error)) throw error;
+      }
+    }
+    throw lastError;
+  }
+
+  private async searchOnce(body: Record<string, unknown>): Promise<TgtoSearchData> {
     const raw = await this.post("/api/media/resources/search", body);
     const envelope = asRecord(raw);
     if (envelope["success"] !== true) {
@@ -243,6 +272,7 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
           status,
           candidates: candidates.length,
           ...(filteredStats.length > 0 ? { filtered: filteredStats } : {}),
+          ...(status === "degraded" ? { error: summarizeSearchErrors(data.errors) } : {}),
         },
       ],
       // An empty result WITH upstream errors is not an authoritative "no such
@@ -448,9 +478,29 @@ async function defaultFetchJson(
     signal: AbortSignal.timeout(init.timeoutMs ?? TGTO_DEFAULT_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`tgto upstream HTTP ${response.status}`);
+    throw new TgtoHttpError(response.status);
   }
   return response.json();
+}
+
+/** 只有「基础设施暂时没答」才值得重试：超时、连接类错误、5xx。
+ *  4xx 与上游明确拒绝（success=false）重试也不会变，反而放大延迟。 */
+function isRetryableSearchError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "TimeoutError" || error.name === "AbortError") return true;
+  if (error instanceof TgtoHttpError) return error.status >= 500;
+  return hasRecognisedUnreachableCode(error);
+}
+
+/** Tgto answers 200 even when some of its internal sources fail; carry those
+ *  errors into the trace so \"degraded\" is not a dead end. */
+function summarizeSearchErrors(errors: readonly unknown[]): string {
+  const parts = errors
+    .slice(0, 3)
+    .map((error) => (typeof error === "string" ? error : (JSON.stringify(error) ?? String(error))))
+    .filter((part) => part.length > 0);
+  const summary = `${errors.length} 个上游源报错${parts.length > 0 ? `：${parts.join("；")}` : ""}`;
+  return summary.length <= 160 ? summary : `${summary.slice(0, 159)}…`;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

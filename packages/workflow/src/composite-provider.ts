@@ -58,7 +58,12 @@ export class CompositeResourceProvider implements ResourceProvider, ResourceCand
         // 的处置建议,不能在这一层就压平。
         const status = classifySourceFailure(result.reason);
         healths.push({ status, source: name });
-        sourceStats.push({ name, status, candidates: 0 });
+        sourceStats.push({
+          name,
+          status,
+          candidates: 0,
+          error: sourceFailureDetail(result.reason),
+        });
         continue;
       }
       // 成员可能不抛错而是自报不健康(PanSou 就是这样),所以要读字段而不是
@@ -110,7 +115,32 @@ function memberSourceStat(
     status,
     candidates: snapshot.candidates.length,
     ...(reported?.filtered !== undefined ? { filtered: reported.filtered } : {}),
+    ...(reported?.error !== undefined ? { error: reported.error } : {}),
   };
+}
+
+const MAX_ERROR_DETAIL = 160;
+
+/** Persist enough of a member failure to tell "timeout" from "bad URL" from a
+ *  transient 5xx — the status alone sends users to the wrong fix. */
+function sourceFailureDetail(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as { cause?: { code?: unknown } }).cause;
+    const code = cause?.code ?? (error as { code?: unknown }).code;
+    const message =
+      error.name === "TimeoutError"
+        ? "请求超时"
+        : error.name === "AbortError"
+          ? "请求中断"
+          : error.message;
+    const detail = typeof code === "string" ? `${code}: ${message}` : message;
+    return truncate(detail);
+  }
+  return truncate(String(error));
+}
+
+function truncate(text: string): string {
+  return text.length <= MAX_ERROR_DETAIL ? text : `${text.slice(0, MAX_ERROR_DETAIL - 1)}…`;
 }
 
 /** 把成员自报的合并态折回单源状态。

@@ -446,6 +446,7 @@ function SourceStatsRow({
             {stat.status !== "healthy" ? (
               <span className="trace-pill tone-warn">{healthLabel(stat.status)}</span>
             ) : null}
+            {stat.error ? <span className="trace-source-error">{stat.error}</span> : null}
           </div>
         );
       })}
@@ -676,20 +677,8 @@ function TransferCard({
  *  the first line names the earliest reason the run could not proceed. */
 function runDiagnostics(trace: RunTrace): string[] {
   const out: string[] = [];
-  const sources = new Map<string, string>();
-  for (const search of trace.searches) {
-    for (const source of search.sourceHealth?.unhealthySources ?? []) {
-      sources.set(source, search.sourceHealth?.status ?? "unhealthy");
-    }
-  }
-  for (const [source, status] of sources) {
-    out.push(
-      status === "protocol_error"
-        ? `搜索源「${source}」协议错误（地址填错，或对方不是 PanSou 服务），这次“没找到”不成立。`
-        : status === "degraded"
-          ? `搜索源「${source}」证据不完整（部分源不可用），这次“没找到”不能完全当真。`
-          : `搜索源「${source}」不可用（${status}），这次结果可能不完整。`,
-    );
+  for (const issue of collectSourceIssues(trace)) {
+    out.push(sourceIssueMessage(issue));
   }
   if (trace.searches.length === 0 && trace.run.kind !== "replace_request") {
     out.push("这次运行没有发起资源搜索。");
@@ -729,6 +718,81 @@ function runDiagnostics(trace: RunTrace): string[] {
     out.push("115 返回 no_target_change：网盘里没有可用缓存副本，并不代表链接失效。");
   }
   return out;
+}
+
+interface SourceIssue {
+  source: string;
+  status: string | null;
+  /** 1-based ordinals of the searches in which this source was unhealthy. */
+  failed: number[];
+  /** How many searches actually mounted this source (0 when the snapshot predates sourceStats). */
+  mounted: number;
+  errors: string[];
+}
+
+/** Aggregate unhealthy sources across the whole run. A source that failed once
+ *  and answered afterwards is a transient blip, not a broken configuration —
+ *  the diagnosis must say which searches were affected instead of implying the
+ *  source is down for the entire run. */
+function collectSourceIssues(trace: RunTrace): SourceIssue[] {
+  const issues = new Map<string, SourceIssue>();
+  const touch = (source: string): SourceIssue => {
+    const existing = issues.get(source);
+    if (existing) return existing;
+    const created: SourceIssue = { source, status: null, failed: [], mounted: 0, errors: [] };
+    issues.set(source, created);
+    return created;
+  };
+  trace.searches.forEach((search, index) => {
+    const ordinal = index + 1;
+    if (search.sourceStats) {
+      for (const stat of search.sourceStats) {
+        const issue = touch(stat.name);
+        issue.mounted += 1;
+        if (stat.status === "healthy") continue;
+        issue.status ??= stat.status;
+        issue.failed.push(ordinal);
+        if (stat.error && !issue.errors.includes(stat.error)) issue.errors.push(stat.error);
+      }
+      return;
+    }
+    // Legacy snapshot: only the unhealthy names survived, mounted count is unknown.
+    for (const source of search.sourceHealth?.unhealthySources ?? []) {
+      const issue = touch(source);
+      issue.status ??= search.sourceHealth?.status ?? "unreachable";
+      issue.failed.push(ordinal);
+    }
+  });
+  return [...issues.values()].filter((issue) => issue.failed.length > 0);
+}
+
+function sourceIssueMessage(issue: SourceIssue): string {
+  const detail = issue.errors.length > 0 ? ` 错误：${issue.errors.join("；")}。` : "";
+  const status = issue.status ?? "unreachable";
+  const answerable = issue.mounted - issue.failed.length;
+  if (issue.mounted > 0 && answerable > 0) {
+    return `搜索源「${issue.source}」仅在第 ${issue.failed.join("、")} 次搜索中${issueStatusPhrase(status)}，其余 ${answerable} 次正常，这次“没找到”的证据略不完整。${detail}`;
+  }
+  return `${
+    status === "protocol_error"
+      ? `搜索源「${issue.source}」协议错误（地址填错，或对方不是 PanSou 服务），这次“没找到”不成立。`
+      : status === "degraded"
+        ? `搜索源「${issue.source}」证据不完整（部分源不可用），这次“没找到”不能完全当真。`
+        : `搜索源「${issue.source}」不可用（${issueStatusPhrase(status)}），这次结果可能不完整。`
+  }${detail}`;
+}
+
+function issueStatusPhrase(status: string): string {
+  switch (status) {
+    case "degraded":
+      return "证据不完整";
+    case "protocol_error":
+      return "协议错误";
+    case "unreachable":
+      return "不可达";
+    default:
+      return status;
+  }
 }
 
 function healthLabel(status: string): string {

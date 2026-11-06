@@ -73,6 +73,7 @@ function search(id: string, keyword: string): ResourceSnapshot {
         candidates: 0,
         filtered: [{ reason: "points_unknown", count: 3 }],
       },
+      { name: "prowlarr", status: "unreachable", candidates: 0, error: "请求超时" },
     ],
     prefilter: {
       provider: "jev",
@@ -165,6 +166,7 @@ describe("getRunTrace", () => {
         candidates: 0,
         filtered: [{ reason: "points_unknown", count: 3 }],
       },
+      { name: "prowlarr", status: "unreachable", candidates: 0, error: "请求超时" },
     ]);
     expect(trace!.searches[0]!.prefilter?.dropped).toEqual([
       { id: "c_snap_1_2", title: "毛雪汪 4K 1080p", score: 0.12 },

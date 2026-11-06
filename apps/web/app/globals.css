@@ -3610,6 +3610,7 @@ select.setting-control {
 .trace-source-count { font-variant-numeric: tabular-nums; }
 .trace-source-filtered { color: var(--warning); }
 .trace-source.tone-warn .trace-source-name { color: var(--warning); }
+.trace-source-error { color: var(--warning); opacity: 0.85; overflow-wrap: anywhere; }
 
 .trace-drops {
   margin-top: 8px;

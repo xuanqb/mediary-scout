@@ -214,6 +214,11 @@ export interface ResourceSourceStat {
   /** Candidates the provider produced after its own filters (before composite dedupe). */
   candidates: number;
   filtered?: ResourceSourceFilterStat[];
+  /** Why the source is not healthy: thrown error (timeout/code/message) for a
+   *  failed request, or the provider's own upstream error summary. Absent when
+   *  healthy, so the trace can explain a transient failure instead of only
+   *  saying "unreachable". */
+  error?: string;
 }
 
 export interface ResourceSnapshot {
