@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   runSeasonPatrolNow: vi.fn(),
 }));
 const { listTrackedSeasonStates, runSeasonPatrolNow } = mocks;
-vi.mock("../lib/workflow-runtime", () => ({
+vi.mock("./workflow-runtime", () => ({
   queueCandidateSeries: vi.fn(),
   queueCandidateTracking: vi.fn(),
   reserveCandidate: vi.fn(),
@@ -18,7 +18,7 @@ vi.mock("../lib/workflow-runtime", () => ({
   runSeasonPatrolNow: mocks.runSeasonPatrolNow,
 }));
 
-import { retrySeasonAction } from "./actions";
+import { retrySeasonNow } from "./season-retry";
 
 const prevDemo = process.env.MEDIA_TRACK_DEMO_MODE;
 
@@ -48,11 +48,11 @@ afterEach(() => {
   else process.env.MEDIA_TRACK_DEMO_MODE = prevDemo;
 });
 
-describe("retrySeasonAction", () => {
+describe("retrySeasonNow", () => {
   it("refuses an untracked season instead of starting a new acquisition", async () => {
     delete process.env.MEDIA_TRACK_DEMO_MODE;
     listTrackedSeasonStates.mockResolvedValue([]);
-    expect(await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).toEqual({
+    expect(await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).toEqual({
       status: "not_tracked",
       message: "本季尚未追踪，请先点「获取本季」。",
     });
@@ -62,7 +62,7 @@ describe("retrySeasonAction", () => {
   it("does not patrol a completed season", async () => {
     delete process.env.MEDIA_TRACK_DEMO_MODE;
     listTrackedSeasonStates.mockResolvedValue([trackedState({ status: "completed" })]);
-    expect(await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" }).then((r) => r.status)).toBe(
+    expect(await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" }).then((r) => r.status)).toBe(
       "not_active",
     );
     expect(runSeasonPatrolNow).not.toHaveBeenCalled();
@@ -77,7 +77,7 @@ describe("retrySeasonAction", () => {
       workflowRunId: "run_1",
       workflowStatus: "succeeded",
     });
-    expect(await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).toEqual({
+    expect(await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).toEqual({
       status: "completed",
       message: "第 1 季重试完成。",
     });
@@ -93,7 +93,7 @@ describe("retrySeasonAction", () => {
       workflowRunId: "run_1",
       workflowStatus: "partial",
     });
-    expect((await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).status).toBe("partial");
+    expect((await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).status).toBe("partial");
 
     runSeasonPatrolNow.mockResolvedValueOnce({
       trackedSeasonId: "season_1",
@@ -101,7 +101,7 @@ describe("retrySeasonAction", () => {
       workflowRunId: "run_2",
       errorMessage: "storage auth expired",
     });
-    const failed = await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" });
+    const failed = await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" });
     expect(failed.status).toBe("failed");
     expect(failed.message).toContain("storage auth expired");
   });
@@ -110,6 +110,6 @@ describe("retrySeasonAction", () => {
     delete process.env.MEDIA_TRACK_DEMO_MODE;
     listTrackedSeasonStates.mockResolvedValue([trackedState()]);
     runSeasonPatrolNow.mockResolvedValue({ trackedSeasonId: "season_1", status: "skipped_active" });
-    expect((await retrySeasonAction({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).status).toBe("running");
+    expect((await retrySeasonNow({ tmdbId: 66732, seasonNumber: 1, storageId: "cs_115" })).status).toBe("running");
   });
 });

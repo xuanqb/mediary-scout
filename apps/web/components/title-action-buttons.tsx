@@ -6,10 +6,9 @@ import { useRouter } from "../lib/use-router";
 import {
   requestRemainingAction,
   requestSeasonAction,
-  retrySeasonAction,
   type RequestTrackingActionResult,
-  type RetrySeasonActionResult,
 } from "../app/actions";
+import type { RetrySeasonResult } from "../lib/season-retry";
 import { runAction } from "../lib/run-action";
 import { useAcquisitionLock } from "./acquisition-lock";
 import { AcquireResultNotice, isLockedResult } from "./request-state";
@@ -264,12 +263,12 @@ export function RetrySeasonButton({
 }) {
   const router = useRouter();
   const lock = useAcquisitionLock();
-  const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<RetrySeasonActionResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RetrySeasonResult | null>(null);
   const scope = `retry-${seasonNumber}`;
   const mine = lock?.acquiring === scope;
   const othersAcquiring = (lock != null && lock.acquiring != null && !mine) || titleAcquiring;
-  const inFlight = isPending || mine;
+  const inFlight = busy || mine;
   const demo = isDemoModeClient();
 
   if (demo) return null;
@@ -299,28 +298,37 @@ export function RetrySeasonButton({
             ? "该剧正在获取中，请稍候"
             : result?.message ?? `重试第 ${seasonNumber} 季（只补缺集）`
         }
-        disabled={isPending || othersAcquiring}
+        disabled={inFlight || othersAcquiring}
         onClick={(event) => {
           // Inside <summary>: never toggle the episode list when retrying.
           event.preventDefault();
           event.stopPropagation();
           lock?.lock(scope);
-          startTransition(async () => {
+          setBusy(true);
+          // Plain fetch, NOT a server action: this request can run for minutes,
+          // and a pending server action suspends the App Router — every link and
+          // button on the page stops responding until it resolves.
+          void (async () => {
             try {
-              const r = await runAction(
-                () => retrySeasonAction({ tmdbId, seasonNumber, storageId }),
-                (msg) => {
-                  setResult({ status: "unsupported", message: msg });
-                  router.refresh();
-                },
+              const res = await fetch("/api/seasons/retry", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ tmdbId, seasonNumber, storageId }),
+              });
+              const next = (await res.json().catch(() => null)) as RetrySeasonResult | null;
+              setResult(
+                res.ok && next
+                  ? next
+                  : { status: "unsupported", message: "操作失败了。刷新页面后再试一次。" },
               );
-              if (!r.ok) return;
-              setResult(r.value);
-              router.refresh();
+            } catch {
+              setResult({ status: "unsupported", message: "操作失败了。刷新页面后再试一次。" });
             } finally {
+              setBusy(false);
               lock?.lock(null);
+              router.refresh();
             }
-          });
+          })();
         }}
       >
         {inFlight ? (
