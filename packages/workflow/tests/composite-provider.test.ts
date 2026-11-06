@@ -115,6 +115,29 @@ describe("CompositeResourceProvider", () => {
     ]);
   });
 
+  it("carries a member's cached flag into the composite stats", async () => {
+    const tgto: ResourceProvider = {
+      async search(input) {
+        return {
+          id: "tgto_snap",
+          provider: "tgto",
+          keyword: input.keyword,
+          createdAt: "2026-06-17T00:00:00.000Z",
+          candidates: [],
+          sourceStats: [{ name: "tgto", status: "healthy", candidates: 0, cached: true }],
+        };
+      },
+    };
+    const composite = new CompositeResourceProvider({
+      providers: [
+        { name: "pansou", provider: fakeProvider("pansou", []) },
+        { name: "tgto", provider: tgto },
+      ],
+    });
+    const snap = await composite.search({ keyword: "x" });
+    expect(snap.sourceStats?.[1]).toEqual({ name: "tgto", status: "healthy", candidates: 0, cached: true });
+  });
+
   it("records why a source failed, so a transient timeout is explainable later", async () => {
     const timedOut: ResourceProvider = {
       async search() {

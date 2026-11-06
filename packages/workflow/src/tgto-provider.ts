@@ -202,6 +202,12 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
   private readonly maxPoints: number;
   private readonly allowedTypes: readonly ResourceType[] | undefined;
   private readonly now: () => string;
+  /** Same-run reuse keyed by media identity. Tgto resolves a search to a work via
+   *  tmdb_id, so re-keywording for the same work returns the same items and only
+   *  burns an upstream call (and its per-call accounting). The instance lives for
+   *  one run (the worker rebuilds the provider per claimed run), so a cached
+   *  result can never leak into a later run. */
+  private readonly searchCache = new Map<string, TgtoSearchData>();
 
   constructor(options: TgtoResourceProviderOptions) {
     this.client = options.client;
@@ -243,11 +249,26 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
       ...(context?.year ? { year: context.year } : {}),
     };
 
+    // A search for a known work is answered by the work, not the keyword: once
+    // this run has asked Tgto about it, another keyword would return the same
+    // items. Re-building a fresh snapshot from the cached response keeps every
+    // search a distinct, snapshot-bound trace entry.
+    const cacheKey = mediaIdentityKey(context);
+    const cached = cacheKey === null ? undefined : this.searchCache.get(cacheKey);
     let data: TgtoSearchData;
-    try {
-      data = await this.client.searchResources(body);
-    } catch (error) {
-      return emptySnapshot(snapshotId, keyword, this.now(), classifySourceFailure(error));
+    let reused = false;
+    if (cached) {
+      data = cached;
+      reused = true;
+    } else {
+      try {
+        data = await this.client.searchResources(body);
+      } catch (error) {
+        return emptySnapshot(snapshotId, keyword, this.now(), classifySourceFailure(error));
+      }
+      // Only an authoritative answer is reusable: a degraded response means an
+      // upstream sub-source failed, and a later keyword may reach it healthy.
+      if (cacheKey !== null && data.errors.length === 0) this.searchCache.set(cacheKey, data);
     }
 
     const candidates: ResourceCandidate[] = [];
@@ -277,6 +298,7 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
           name: "tgto",
           status,
           candidates: candidates.length,
+          ...(reused ? { cached: true } : {}),
           ...(filteredStats.length > 0 ? { filtered: filteredStats } : {}),
           ...(status === "degraded" ? { error: summarizeSearchErrors(data.errors) } : {}),
         },
@@ -482,6 +504,15 @@ function emptySnapshot(
   const snapshot: ResourceSnapshot = { id, provider: "tgto", keyword, candidates: [], createdAt };
   if (health) snapshot.sourceHealth = mergeSourceHealth([{ status: health, source: "tgto" }]);
   return snapshot;
+}
+
+/** The key a search can be reused under, or null when the run has no media
+ *  identity. Without a tmdb id the keyword IS the query, so two keywords may
+ *  genuinely recall different items and must each hit the source. */
+function mediaIdentityKey(context: ResourceSearchInput["context"]): string | null {
+  const id = context?.tmdbId;
+  if (typeof id !== "number" || !Number.isFinite(id) || id <= 0) return null;
+  return `${id}|${context?.mediaType ?? ""}`;
 }
 
 function scopedId(provider: string, keyword: string, workflowRunId?: string): string {

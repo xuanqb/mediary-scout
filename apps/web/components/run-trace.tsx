@@ -443,6 +443,7 @@ function SourceStatsRow({
                 {filtered.map((entry) => ` · ${filterReasonLabel(entry.reason)} ×${entry.count}`).join("")}
               </span>
             ) : null}
+            {stat.cached ? <span className="trace-pill tone-muted">复用</span> : null}
             {stat.status !== "healthy" ? (
               <span className="trace-pill tone-warn">{healthLabel(stat.status)}</span>
             ) : null}

@@ -226,6 +226,9 @@ export interface ResourceSourceStat {
    *  healthy, so the trace can explain a transient failure instead of only
    *  saying "unreachable". */
   error?: string;
+  /** This search reused an earlier same-run result instead of calling the source
+   *  again (only providers that resolve by media identity, not by keyword). */
+  cached?: boolean;
 }
 
 export interface ResourceSnapshot {

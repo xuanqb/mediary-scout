@@ -247,11 +247,82 @@ describe("TgtoResourceProvider", () => {
     expect(bodies[0]).not.toHaveProperty("provider");
     expect(bodies[0]).not.toHaveProperty("season");
 
+    // A different work, so the identity cache (same run) does not answer it.
     await p.search({
       keyword: "怪奇物语",
-      context: { title: "怪奇物语", tmdbId: 66732, mediaType: "tv", seasons: [1, 2] },
+      context: { title: "怪奇物语", tmdbId: 66733, mediaType: "tv", seasons: [1, 2] },
     });
     expect(bodies[1]).not.toHaveProperty("season");
+  });
+
+  it("reuses one upstream call for the same work across keywords, with a fresh snapshot per search", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      return okResponse([shareItem()]);
+    });
+    const context = { title: "诛仙", tmdbId: 94619, mediaType: "tv" as const, year: 2022 };
+    const first = await p.search({ keyword: "诛仙", context, workflowRunId: "run1" });
+    const second = await p.search({ keyword: "诛仙 S04E14", context, workflowRunId: "run1" });
+    const third = await p.search({ keyword: "Jade Dynasty", context, workflowRunId: "run1" });
+
+    // Tgto resolves by tmdb_id: the extra keywords must not spend an upstream call.
+    expect(calls).toBe(1);
+    expect(second.id).not.toBe(first.id);
+    expect(third.id).not.toBe(first.id);
+    expect(second.keyword).toBe("诛仙 S04E14");
+    expect(second.candidates.map((c) => c.title)).toEqual(first.candidates.map((c) => c.title));
+    // Each search owns its snapshot: transfers stay bound to the snapshot the
+    // agent actually saw, even when the rows came from the earlier call.
+    expect(second.candidates[0]!.snapshotId).toBe(second.id);
+    expect(second.candidates[0]!.id.startsWith(second.id)).toBe(true);
+    expect(first.sourceStats?.[0]?.cached).toBeUndefined();
+    expect(second.sourceStats?.[0]?.cached).toBe(true);
+    expect(third.sourceStats?.[0]?.cached).toBe(true);
+  });
+
+  it("does not reuse results without a tmdb id (the keyword is the query)", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      return okResponse([shareItem()]);
+    });
+    await p.search({ keyword: "诛仙" });
+    await p.search({ keyword: "Jade Dynasty" });
+    expect(calls).toBe(2);
+  });
+
+  it("does not reuse results across different works", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      return okResponse([shareItem()]);
+    });
+    await p.search({ keyword: "诛仙", context: { tmdbId: 1, mediaType: "tv" } });
+    await p.search({ keyword: "诛仙", context: { tmdbId: 2, mediaType: "tv" } });
+    expect(calls).toBe(2);
+  });
+
+  it("does not reuse a degraded answer, so a later keyword can retry the source", async () => {
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      return {
+        success: true,
+        data: {
+          items: calls === 1 ? [] : [shareItem()],
+          errors: calls === 1 ? ["re0 timeout"] : [],
+        },
+      };
+    });
+    const context = { tmdbId: 338938, mediaType: "tv" as const };
+    const first = await p.search({ keyword: "后会友期", context });
+    expect(first.sourceHealth?.status).toBe("degraded");
+
+    const second = await p.search({ keyword: "后会友期 2026", context });
+    expect(calls).toBe(2);
+    expect(second.candidates).toHaveLength(1);
+    expect(second.sourceStats?.[0]?.cached).toBeUndefined();
   });
 
   it("searches the requested keyword, not the canonical title (Tgto ignores aliases)", async () => {

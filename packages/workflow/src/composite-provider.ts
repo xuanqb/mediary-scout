@@ -116,6 +116,7 @@ function memberSourceStat(
     candidates: snapshot.candidates.length,
     ...(reported?.filtered !== undefined ? { filtered: reported.filtered } : {}),
     ...(reported?.error !== undefined ? { error: reported.error } : {}),
+    ...(reported?.cached ? { cached: true } : {}),
   };
 }
 
