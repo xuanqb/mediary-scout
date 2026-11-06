@@ -22,7 +22,12 @@ import { useDemoAcquisitions, useDemoInProgress } from "../lib/use-demo-session"
 
 const POLL_MS = 2600;
 
-export function ActivityFeed({ storageId }: { storageId?: string | undefined }) {
+export function ActivityFeed() {
+  // This component lives in the page's STATIC shell (see app/activity/page.tsx):
+  // a client component inside a streamed dynamic RSC hole does not hydrate, which
+  // freezes the live poll. The active drive therefore comes from the URL here,
+  // not a server-decoded prop (useSearchParams would suspend the static shell).
+  const [storageId, setStorageId] = useState<string | undefined>(undefined);
   // 已完成 is session-scoped by OBSERVATION: the runIds this browser saw active.
   // Robust to notification createdAt timing (a since-filter wrongly dropped runs
   // the user opened the page after — createdAt ≈ run-start, not finish).
@@ -32,8 +37,12 @@ export function ActivityFeed({ storageId }: { storageId?: string | undefined }) 
   useEffect(() => {
     let alive = true;
     const poll = async () => {
+      // Read the drive per tick: switching workspaces is a client-side navigation
+      // to `/activity?w=…`, which reuses this mounted component.
+      const current = new URLSearchParams(window.location.search).get("w") ?? undefined;
+      if (alive) setStorageId(current);
       try {
-        const url = storageId ? `/api/activity?w=${encodeURIComponent(storageId)}` : "/api/activity";
+        const url = current ? `/api/activity?w=${encodeURIComponent(current)}` : "/api/activity";
         const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) return;
         const data = (await res.json()) as ActivityView;
@@ -51,7 +60,7 @@ export function ActivityFeed({ storageId }: { storageId?: string | undefined }) 
       alive = false;
       clearInterval(id);
     };
-  }, [storageId]);
+  }, []);
 
   const running = view.active.filter((run) => run.status === "running");
   const queued = view.active
@@ -59,6 +68,9 @@ export function ActivityFeed({ storageId }: { storageId?: string | undefined }) 
     .sort((a, b) => (a.queuePosition ?? 0) - (b.queuePosition ?? 0));
   // Only show completions for runs THIS session watched go active → done.
   const completed = view.recentCompleted.filter((item) => seenActive.current.has(item.workflowRunId));
+  // …and keep the rest reachable: without this, a run that finished before the
+  // page was opened has no entry at all (the trace page would be URL-only).
+  const history = view.recentCompleted.filter((item) => !seenActive.current.has(item.workflowRunId));
   // Demo: acquisitions are client-only (no DB run) → surface this session's
   // acquired titles as completed items, and in-progress playbacks as live 获取中
   // rows, so the activity page reflects them like production.
@@ -96,9 +108,26 @@ export function ActivityFeed({ storageId }: { storageId?: string | undefined }) 
 
       <CollapsibleSection title="已完成" count={allCompleted.length} note="仅本次浏览" defaultOpen>
         {allCompleted.length === 0 ? (
-          <p className="act-empty">本次浏览还没有完成的任务，历史可在通知查看。</p>
+          <p className="act-empty">本次浏览还没有完成的任务，历史见下方“运行历史”。</p>
         ) : (
-          allCompleted.map((item) => <CompletedRow item={item} key={item.workflowRunId} />)
+          allCompleted.map((item) => (
+            <CompletedRow item={item} storageId={storageId} key={item.workflowRunId} />
+          ))
+        )}
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="运行历史"
+        count={history.length}
+        note="最近 30 条 · 点“查看过程”排查"
+        defaultOpen
+      >
+        {history.length === 0 ? (
+          <p className="act-empty">没有更早的运行记录。</p>
+        ) : (
+          history.map((item) => (
+            <CompletedRow item={item} storageId={storageId} key={`history_${item.workflowRunId}`} />
+          ))
         )}
       </CollapsibleSection>
     </div>
@@ -119,18 +148,29 @@ function seasonLabel(run: ActivityActiveRun): string {
   return activeRunLabel({ ...run, seasonNumbers: run.seasonNumbers ?? [] });
 }
 
+/** `/activity/<runId>` link carrying the active drive (omitted for the primary,
+ *  mirroring the rest of the app's `?w` convention). */
+function traceHref(runId: string, storageId?: string | undefined): string {
+  return `/activity/${encodeURIComponent(runId)}${storageId ? `?w=${encodeURIComponent(storageId)}` : ""}`;
+}
+
 function RunningRow({ run, storageId }: { run: ActivityActiveRun; storageId?: string | undefined }) {
   const percent = Math.max(3, Math.min(100, run.progress?.percent ?? 3));
   const headline =
     run.progress?.needed && run.progress.needed > 0
       ? `已确认 ${run.progress.obtained ?? 0} / ${run.progress.needed} 集`
       : null;
+  const show = showHref(run.tmdbId, "library", storageId, run.type);
   return (
-    <Link className="act-row act-row-active" href={showHref(run.tmdbId, "library", storageId, run.type)}>
-      {poster(run.posterPath, run.title, "info")}
+    <div className="act-row act-row-active">
+      <Link className="act-poster-link" href={show} aria-label={`打开 ${run.title}`}>
+        {poster(run.posterPath, run.title, "info")}
+      </Link>
       <div className="act-row-body">
         <div className="act-row-head">
-          <strong>{run.title}</strong>
+          <Link href={show}>
+            <strong>{run.title}</strong>
+          </Link>
           {seasonLabel(run) ? <span className="act-sub">{seasonLabel(run)}</span> : null}
           {headline ? <span className="act-frac">{headline}</span> : null}
         </div>
@@ -140,9 +180,12 @@ function RunningRow({ run, storageId }: { run: ActivityActiveRun; storageId?: st
         <div className="act-ticker-row">
           <Loader2 size={14} className="act-spin" aria-hidden />
           <Ticker text={run.progress?.activity ?? "正在准备…"} />
+          <Link className="act-trace" href={traceHref(run.runId, storageId)}>
+            查看过程
+          </Link>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -242,7 +285,13 @@ function completedPillLabel(status: ActivityCompletedItem["status"]): string {
   }
 }
 
-function CompletedRow({ item }: { item: ActivityCompletedItem }) {
+function CompletedRow({
+  item,
+  storageId,
+}: {
+  item: ActivityCompletedItem;
+  storageId?: string | undefined;
+}) {
   const ok =
     item.status === "complete" || item.status === "acquired" || item.status === "airing" || item.status === "replaced";
   const failed = item.status === "failed";
@@ -258,6 +307,11 @@ function CompletedRow({ item }: { item: ActivityCompletedItem }) {
         </span>
         {item.sizeText ? <span className="act-sub">{item.sizeText}</span> : null}
         {failed ? <RetryButton runId={item.workflowRunId} title={item.title} /> : null}
+        {item.workflowRunId.startsWith("demo-") ? null : (
+          <Link className="act-trace" href={traceHref(item.workflowRunId, storageId)}>
+            查看过程
+          </Link>
+        )}
       </div>
     </div>
   );
