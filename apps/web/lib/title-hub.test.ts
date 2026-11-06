@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createEpisodeStates,
   InMemoryWorkflowRepository,
@@ -202,6 +202,76 @@ describe("getLibraryWall — Emby-covered gaps", () => {
       state: "complete",
       airing: false,
     });
+  });
+});
+
+describe("getLibraryWall — 最近入库优先", () => {
+  let repo: InMemoryWorkflowRepository;
+  let hub: typeof import("./title-hub");
+
+  beforeEach(async () => {
+    repo = new InMemoryWorkflowRepository();
+    vi.resetModules();
+    vi.doMock("./workflow-runtime", async () => {
+      const actual = await vi.importActual<typeof import("./workflow-runtime")>("./workflow-runtime");
+      return { ...actual, getWorkflowRepository: () => repo, getActiveWorkspaceScope: async () => scope };
+    });
+    hub = await import("./title-hub");
+    vi.useFakeTimers();
+  }, 30_000);
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function seed(t: MediaTitle, s: TrackedSeason, obtainedCodes: string[]) {
+    await repo.saveWorkflowRunSnapshot({
+      ...scope,
+      title: t,
+      season: s,
+      workflowRun: {
+        id: `seed_${t.id}_s${s.seasonNumber}`,
+        kind: "type2_init",
+        status: "succeeded",
+        trackedSeasonId: s.id,
+        startedAt: NOW,
+        finishedAt: NOW,
+        auditEvents: [],
+      },
+      episodes: createEpisodeStates({
+        trackedSeasonId: s.id,
+        seasonNumber: s.seasonNumber,
+        totalEpisodes: 2,
+        latestAiredEpisode: 2,
+      }).map((episode) => ({ ...episode, obtained: obtainedCodes.includes(episode.episodeCode) })),
+      resourceSnapshots: [],
+      decisions: [],
+      transferAttempts: [],
+      notifications: [],
+    });
+  }
+
+  const wallIds = async () => (await hub.getLibraryWall()).map((entry) => entry.tmdbId);
+
+  it("newest obtained first, and a re-save that obtains nothing does not bump it", async () => {
+    const alpha = title(101, "Alpha");
+    const beta = title(102, "Beta");
+    vi.setSystemTime(new Date("2026-09-20T08:00:00.000Z"));
+    await seed(alpha, season(alpha, 1), ["S01E01"]);
+    vi.setSystemTime(new Date("2026-09-28T08:00:00.000Z"));
+    await seed(beta, season(beta, 1), ["S01E01"]);
+    // Beta is newer despite Alpha winning the pinyin tie-break.
+    expect(await wallIds()).toEqual([102, 101]);
+
+    // A patrol-style re-save with the SAME obtained set must not promote Alpha.
+    vi.setSystemTime(new Date("2026-09-30T08:00:00.000Z"));
+    await seed(alpha, season(alpha, 1), ["S01E01"]);
+    expect(await wallIds()).toEqual([102, 101]);
+
+    // Alpha actually obtains a new episode → it becomes the newest.
+    vi.setSystemTime(new Date("2026-10-02T08:00:00.000Z"));
+    await seed(alpha, season(alpha, 1), ["S01E01", "S01E02"]);
+    expect(await wallIds()).toEqual([101, 102]);
   });
 });
 

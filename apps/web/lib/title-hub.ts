@@ -619,6 +619,9 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
   }
 
   const entries: LibraryWallEntry[] = [];
+  /** Title → newest "entered the library" timestamp (ISO). Legacy rows without
+   *  timestamps stay empty and sort after timestamped ones. */
+  const recencyByTitle = new Map<number, string>();
   for (const [tmdbId, titleStates] of byTitle) {
     const title = titleStates[0]!.title;
     let posterPath = title.posterPath ?? null;
@@ -681,6 +684,15 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
         anyActive = true;
       }
     }
+    // 最近入库优先: the newest obtained-episode stamp across this title's seasons.
+    // `trackedAt` is the fallback for a subscription that has not landed anything yet.
+    recencyByTitle.set(
+      tmdbId,
+      titleStates.reduce((latest, state) => {
+        const at = state.season.lastObtainedAt ?? state.season.trackedAt ?? "";
+        return at > latest ? at : latest;
+      }, ""),
+    );
     // An unreleased movie is 预定 (reserved), not 有缺集 — its anchor reads aired=1
     // but it simply hasn't come out yet.
     const unreleased = title.type === "movie" && isMovieUnreleased(title.releaseDate, now);
@@ -700,7 +712,13 @@ export async function getLibraryWall(storageId?: string): Promise<LibraryWallEnt
       airing: libraryWallAiring({ anyActive, unreleased }),
     });
   }
-  return entries.sort((a, b) => a.title.localeCompare(b.title, "zh-Hans-CN"));
+  return entries.sort((a, b) => {
+    const byRecency = (recencyByTitle.get(b.tmdbId) ?? "").localeCompare(
+      recencyByTitle.get(a.tmdbId) ?? "",
+    );
+    // Newest first; same moment (or both legacy) falls back to title pinyin.
+    return byRecency !== 0 ? byRecency : a.title.localeCompare(b.title, "zh-Hans-CN");
+  });
 }
 
 export interface InProgressTitle {

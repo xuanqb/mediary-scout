@@ -89,6 +89,7 @@ import {
   UNSCOPED_STORAGE,
   validateWorkflowRunSnapshot,
   findStagingRecoveryIn,
+  stampTrackedSeason,
   withDerivedEpisodeSummaries,
   workflowSnapshotFromReservation,
 } from "./repository.js";
@@ -566,6 +567,16 @@ export class SqliteWorkflowRepository implements WorkflowRepository {
           "INSERT INTO media_titles (id, payload) VALUES (?, ?) ON CONFLICT (id) DO UPDATE SET payload = excluded.payload",
         )
         .run(snapshot.title.id, JSON.stringify(snapshot.title));
+      const previousSeason = this.db
+        .prepare("SELECT payload FROM tracked_seasons WHERE id = ? AND connected_storage_id = ?")
+        .get(snapshot.season.id, connectedStorageId) as { payload: string } | undefined;
+      snapshot.season = stampTrackedSeason({
+        season: snapshot.season,
+        previousSeason: previousSeason ? (JSON.parse(previousSeason.payload) as TrackedSeason) : null,
+        previousEpisodes: this.selectEpisodeStates(snapshot.season.id, connectedStorageId),
+        episodes: snapshot.episodes,
+        now: new Date().toISOString(),
+      });
       this.upsertTrackedSeason(snapshot.season, accountId, connectedStorageId);
     }
     this.upsertWorkflowRun(snapshot.workflowRun, accountId, connectedStorageId);

@@ -1200,6 +1200,15 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       this.workflowRuns.set(cloned.workflowRun.id, cloned);
       return;
     }
+    const previousRecord = this.latestSeasonRecordSync(cloned.season.id, cloned.connectedStorageId);
+    cloned.season = stampTrackedSeason({
+      season: cloned.season,
+      previousSeason: previousRecord?.season ?? null,
+      previousEpisodes:
+        this.episodesBySeason.get(bucketKey) ?? previousRecord?.episodes ?? [],
+      episodes: cloned.episodes,
+      now: new Date().toISOString(),
+    });
     this.workflowRuns.set(cloned.workflowRun.id, cloned);
     this.episodesBySeason.set(bucketKey, cloneWorkflowValue(cloned.episodes));
   }
@@ -1283,6 +1292,14 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
       cloned.episodes = cloneWorkflowValue(this.episodesBySeason.get(bucketKey) ?? current.episodes);
       this.workflowRuns.set(cloned.workflowRun.id, cloned);
     } else {
+      const previousRecord = this.latestSeasonRecordSync(cloned.season.id, storageValue);
+      cloned.season = stampTrackedSeason({
+        season: cloned.season,
+        previousSeason: previousRecord?.season ?? null,
+        previousEpisodes: existingEpisodes,
+        episodes: cloned.episodes,
+        now: new Date().toISOString(),
+      });
       this.workflowRuns.set(cloned.workflowRun.id, cloned);
       this.episodesBySeason.set(bucketKey, cloneWorkflowValue(cloned.episodes));
     }
@@ -1908,6 +1925,42 @@ export function validateWorkflowRunSnapshot(input: PersistWorkflowRunSnapshotInp
       throw new Error(`Transfer attempt ${transferAttempt.id} referenced an unknown candidate`);
     }
   }
+}
+
+/**
+ * Stamp a tracked season with its library-recency timestamps. Writers call this
+ * on every full season write (never a run-only write):
+ *  - `trackedAt` is set once, on first insert, and preserved afterwards.
+ *  - `lastObtainedAt` moves only when the obtained episode set GROWS. A patrol
+ *    re-save that obtains nothing keeps the old value, so 最近入库优先 does not
+ *    degenerate into "最近巡检优先".
+ * Legacy seasons without either field stay unstamped until their next real
+ * acquisition, instead of being falsely promoted to "just added".
+ */
+export function stampTrackedSeason(input: {
+  season: TrackedSeason;
+  previousSeason?: TrackedSeason | null;
+  previousEpisodes?: readonly EpisodeState[];
+  episodes: readonly EpisodeState[];
+  now: string;
+}): TrackedSeason {
+  const obtainedBefore = new Set(
+    (input.previousEpisodes ?? []).filter((episode) => episode.obtained).map((episode) => episode.episodeCode),
+  );
+  const grew = input.episodes.some(
+    (episode) => episode.obtained && !obtainedBefore.has(episode.episodeCode),
+  );
+  const trackedAt = input.previousSeason
+    ? (input.previousSeason.trackedAt ?? input.season.trackedAt)
+    : (input.season.trackedAt ?? input.now);
+  const lastObtainedAt = grew
+    ? input.now
+    : (input.previousSeason?.lastObtainedAt ?? input.season.lastObtainedAt);
+  return {
+    ...input.season,
+    ...(trackedAt !== undefined ? { trackedAt } : {}),
+    ...(lastObtainedAt !== undefined ? { lastObtainedAt } : {}),
+  };
 }
 
 export function withDerivedEpisodeSummaries(input: PersistWorkflowRunSnapshotInput): PersistedWorkflowRunSnapshot {

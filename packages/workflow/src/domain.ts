@@ -104,6 +104,13 @@ export interface TrackedSeason {
    *  earlier episodes are OUT of scope — never searched, never counted as 缺集,
    *  and they do not block the season from completing. */
   startEpisode?: number;
+  /** When this (season, drive) was first tracked. Absent on rows written before
+   *  the field existed — the library sorts those after timestamped ones. */
+  trackedAt?: string;
+  /** When an episode of this season most recently became obtained on this drive.
+   *  Drives the library's 最近入库优先 order; absent until something is obtained
+   *  (or for legacy rows). Patrol re-saves that obtain nothing do NOT bump it. */
+  lastObtainedAt?: string;
 }
 
 /** Normalized first episode of a season's subscription (absent/invalid → 1). */

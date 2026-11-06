@@ -43,6 +43,7 @@ import {
   type TrackedSeasonState,
   validateWorkflowRunSnapshot,
   findStagingRecoveryIn,
+  stampTrackedSeason,
   withDerivedEpisodeSummaries,
   workflowSnapshotFromReservation,
   DuplicateUsernameError,
@@ -2221,6 +2222,17 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
     const writeSeasonState = options.runOnly !== true;
     if (writeSeasonState) {
       await this.upsert(client, "media_titles", "(id, payload)", [snapshot.title.id, json(snapshot.title)], "$1, $2::jsonb");
+      snapshot.season = stampTrackedSeason({
+        season: snapshot.season,
+        previousSeason: await this.selectOne<TrackedSeason>(
+          client,
+          "SELECT payload FROM tracked_seasons WHERE id = $1 AND connected_storage_id = $2",
+          [snapshot.season.id, connectedStorageId],
+        ),
+        previousEpisodes: await this.selectEpisodeStates(client, snapshot.season.id, connectedStorageId),
+        episodes: snapshot.episodes,
+        now: new Date().toISOString(),
+      });
       await this.upsertTrackedSeason(client, snapshot.season, accountId, connectedStorageId);
     }
     await this.upsertWorkflowRun(client, snapshot.workflowRun, accountId, connectedStorageId);
