@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { ResourceCandidate, ResourceSnapshot } from "./domain.js";
+import type { ResourceCandidate, ResourceSnapshot, ResourceSourceStat } from "./domain.js";
 import type { ResourceCandidateLinkResolver, ResourceProvider, ResourceSearchInput } from "./ports.js";
 import {
   classifySourceFailure,
@@ -46,6 +46,9 @@ export class CompositeResourceProvider implements ResourceProvider, ResourceCand
     const seen = new Set<string>();
     const sourceSnapshotIds: string[] = [];
     const healths: SourceHealth[] = [];
+    // Per-source contributions make "this source returned 0" distinguishable from
+    // "this source was never mounted" in the persisted trace.
+    const sourceStats: ResourceSourceStat[] = [];
     for (const [index, result] of settled.entries()) {
       const name = this.providers[index]!.name;
       if (result.status !== "fulfilled") {
@@ -53,13 +56,17 @@ export class CompositeResourceProvider implements ResourceProvider, ResourceCand
         // 用 classifySourceFailure 而非硬编码 unreachable:成员抛的可能是
         // PanSouProtocolError(地址指向了别的服务),那与「源挂了」要给用户不同
         // 的处置建议,不能在这一层就压平。
-        healths.push({ status: classifySourceFailure(result.reason), source: name });
+        const status = classifySourceFailure(result.reason);
+        healths.push({ status, source: name });
+        sourceStats.push({ name, status, candidates: 0 });
         continue;
       }
       // 成员可能不抛错而是自报不健康(PanSou 就是这样),所以要读字段而不是
       // 只看 Promise 状态。缺字段的老 provider 视为 healthy(向后兼容)。
       const own = result.value.sourceHealth;
-      healths.push({ status: memberStatus(own?.status), source: name });
+      const status = memberStatus(own?.status);
+      healths.push({ status, source: name });
+      sourceStats.push(memberSourceStat(name, status, result.value));
       sourceSnapshotIds.push(result.value.id);
       for (const candidate of result.value.candidates) {
         const key = dedupeKey(candidate);
@@ -83,9 +90,27 @@ export class CompositeResourceProvider implements ResourceProvider, ResourceCand
       keyword: input.keyword,
       candidates,
       createdAt: this.now(),
+      sourceStats,
       sourceHealth: mergeSourceHealth(healths),
     };
   }
+}
+
+/** Keep a member's own pre-dedupe count and provider-internal filter breakdown;
+ *  synthesize the bare stat for members that do not report one (PanSou/海搜). */
+function memberSourceStat(
+  name: string,
+  status: SourceStatus,
+  snapshot: ResourceSnapshot,
+): ResourceSourceStat {
+  const reported =
+    snapshot.sourceStats?.find((stat) => stat.name === name) ?? snapshot.sourceStats?.[0];
+  return {
+    name,
+    status,
+    candidates: snapshot.candidates.length,
+    ...(reported?.filtered !== undefined ? { filtered: reported.filtered } : {}),
+  };
 }
 
 /** 把成员自报的合并态折回单源状态。

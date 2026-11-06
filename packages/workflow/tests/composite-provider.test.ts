@@ -71,4 +71,45 @@ describe("CompositeResourceProvider", () => {
     expect(snap.candidates).toHaveLength(1);
     expect(snap.candidates[0]!.source).toBe("pansou");
   });
+
+  it("records every provider's contribution so a 0-result source is visible", async () => {
+    const tgto: ResourceProvider = {
+      async search(input) {
+        return {
+          id: "tgto_snap",
+          provider: "tgto",
+          keyword: input.keyword,
+          createdAt: "2026-06-17T00:00:00.000Z",
+          candidates: [],
+          sourceStats: [
+            {
+              name: "tgto",
+              status: "healthy",
+              candidates: 0,
+              filtered: [{ reason: "points_unknown", count: 3 }],
+            },
+          ],
+          sourceHealth: { status: "healthy", unhealthySources: [] },
+        };
+      },
+    };
+    const composite = new CompositeResourceProvider({
+      providers: [
+        { name: "pansou", provider: fakeProvider("pansou", [{ url: "115://a" }, { url: "115://b" }]) },
+        { name: "tgto", provider: tgto },
+        { name: "haisou", provider: fakeProvider("haisou", [], true) },
+      ],
+    });
+    const snap = await composite.search({ keyword: "x" });
+    expect(snap.sourceStats).toEqual([
+      { name: "pansou", status: "healthy", candidates: 2 },
+      {
+        name: "tgto",
+        status: "healthy",
+        candidates: 0,
+        filtered: [{ reason: "points_unknown", count: 3 }],
+      },
+      { name: "haisou", status: "unreachable", candidates: 0 },
+    ]);
+  });
 });

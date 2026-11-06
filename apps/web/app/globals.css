@@ -3589,6 +3589,28 @@ select.setting-control {
   max-width: 52%;
 }
 
+.trace-sources {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.trace-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.trace-source-name { font-weight: 600; color: var(--text-soft); }
+.trace-source-count { font-variant-numeric: tabular-nums; }
+.trace-source-filtered { color: var(--warning); }
+.trace-source.tone-warn .trace-source-name { color: var(--warning); }
+
 .trace-drops {
   margin-top: 8px;
   padding-top: 6px;
@@ -3630,49 +3652,6 @@ select.setting-control {
 }
 .trace-drop-score {
   flex: none;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.trace-steps {
-  display: flex;
-  flex-direction: column;
-  padding: 2px 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-}
-
-.trace-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--border-soft);
-}
-
-.trace-step:last-child { border-bottom: none; }
-
-.trace-step-ord {
-  width: 2.2em;
-  flex: none;
-  padding-top: 3px;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.trace-step-main { flex: 1; min-width: 0; }
-.trace-step-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.trace-step-activity { font-size: 13px; }
-.trace-step-tool {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.trace-step-time {
-  margin-left: auto;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;

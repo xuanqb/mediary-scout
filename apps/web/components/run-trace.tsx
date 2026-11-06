@@ -17,7 +17,6 @@ import type {
   RunTrace,
   RunTraceCandidate,
   RunTraceDecision,
-  RunTraceStep,
   RunTraceTransfer,
 } from "../lib/run-trace";
 
@@ -40,16 +39,6 @@ const KIND_LABEL: Record<string, string> = {
   movie_init: "电影获取",
   replace_request: "换源",
   staging_recovery: "暂存恢复",
-};
-
-const PHASE_LABEL: Record<string, string> = {
-  search: "搜索",
-  pick: "选片",
-  transfer: "转存",
-  verify: "校验",
-  organize: "整理",
-  mark: "标记",
-  finalize: "收尾",
 };
 
 const MEDIA_TYPE_LABEL: Record<string, string> = {
@@ -247,18 +236,6 @@ function TraceBody({ trace, backHref }: { trace: RunTrace; backHref: string }) {
         </section>
       ) : null}
 
-      <TraceSection title="时间线" count={trace.steps.length}>
-        {trace.steps.length === 0 ? (
-          <p className="trace-empty">这次运行没有留下工具调用轨迹（旧版本运行，或尚未进入 agent）。</p>
-        ) : (
-          <div className="trace-steps">
-            {trace.steps.map((step) => (
-              <StepRow step={step} key={step.ordinal} />
-            ))}
-          </div>
-        )}
-      </TraceSection>
-
       <TraceSection title="搜索与候选" count={trace.searches.length}>
         {trace.searches.length === 0 ? (
           <p className="trace-empty">没有搜索快照。</p>
@@ -286,6 +263,7 @@ function TraceBody({ trace, backHref }: { trace: RunTrace; backHref: string }) {
                     ) : null}
                     {search.prefilter ? <PrefilterPill prefilter={search.prefilter} /> : null}
                   </div>
+                  <SourceStatsRow stats={search.sourceStats} />
                   {candidates.length === 0 ? (
                     <p className="trace-empty">这个关键词没有返回候选。</p>
                   ) : (
@@ -429,26 +407,6 @@ function TraceSection({
   );
 }
 
-function StepRow({ step }: { step: RunTraceStep }) {
-  return (
-    <div className="trace-step">
-      <span className="trace-step-ord">{step.ordinal + 1}</span>
-      <div className="trace-step-main">
-        <div className="trace-step-top">
-          <span className="trace-pill tone-info">{PHASE_LABEL[step.phase] ?? step.phase}</span>
-          <span className="trace-step-activity">{step.activity}</span>
-          <span className="trace-step-tool">{step.toolName}</span>
-          <span className="trace-step-time">{hhmmss(step.at)}</span>
-          {step.apiCalls !== undefined ? (
-            <span className="trace-sub">API {step.apiCalls}</span>
-          ) : null}
-        </div>
-        <ArgsDetails args={step.args} />
-      </div>
-    </div>
-  );
-}
-
 function ArgsDetails({ args }: { args: Record<string, unknown> }) {
   if (Object.keys(args).length === 0) return null;
   return (
@@ -459,6 +417,74 @@ function ArgsDetails({ args }: { args: Record<string, unknown> }) {
       <pre>{JSON.stringify(args, null, 2)}</pre>
     </details>
   );
+}
+
+/** Per-provider footprint of one search: how many candidates each mounted source
+ *  produced, and — for providers that filter internally (Tgto) — why raw items
+ *  were dropped. Without this a 0-result source looks like it never ran. */
+function SourceStatsRow({
+  stats,
+}: {
+  stats: NonNullable<RunTrace["searches"][number]["sourceStats"]> | null;
+}) {
+  if (!stats || stats.length === 0) return null;
+  return (
+    <div className="trace-sources">
+      {stats.map((stat) => {
+        const filtered = stat.filtered ?? [];
+        const filteredTotal = filtered.reduce((total, entry) => total + entry.count, 0);
+        return (
+          <div className={`trace-source tone-${stat.status === "healthy" ? "muted" : "warn"}`} key={stat.name}>
+            <span className="trace-source-name">{sourceLabel(stat.name)}</span>
+            <span className="trace-source-count">{stat.candidates} 条</span>
+            {filteredTotal > 0 ? (
+              <span className="trace-source-filtered">
+                原始 {stat.candidates + filteredTotal} · 过滤 {filteredTotal}
+                {filtered.map((entry) => ` · ${filterReasonLabel(entry.reason)} ×${entry.count}`).join("")}
+              </span>
+            ) : null}
+            {stat.status !== "healthy" ? (
+              <span className="trace-pill tone-warn">{healthLabel(stat.status)}</span>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function sourceLabel(name: string): string {
+  switch (name) {
+    case "pansou":
+      return "PanSou";
+    case "haisou":
+      return "海搜";
+    case "tgto":
+      return "TgtoDrive";
+    case "prowlarr":
+      return "Prowlarr";
+    default:
+      return name;
+  }
+}
+
+function filterReasonLabel(reason: string): string {
+  switch (reason) {
+    case "invalid":
+      return "链接失效";
+    case "target_not_115":
+      return "目标不支持 115";
+    case "points_unknown":
+      return "积分未知";
+    case "points_over_cap":
+      return "超过积分上限";
+    case "no_share_ref":
+      return "缺分享引用";
+    case "no_title":
+      return "无标题";
+    default:
+      return reason;
+  }
 }
 
 function PrefilterPill({ prefilter }: { prefilter: NonNullable<RunTrace["searches"][number]["prefilter"]> }) {

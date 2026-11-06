@@ -216,10 +216,20 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
     }
 
     const candidates: ResourceCandidate[] = [];
+    // Explain a 0-result search: raw items the target/points/link guards removed
+    // never reach the snapshot, so without this they look like "upstream had none".
+    const filtered = new Map<string, number>();
     for (const raw of data.items) {
-      const candidate = this.toCandidate(raw, snapshotId, candidates.length);
-      if (candidate) candidates.push(candidate);
+      const outcome = this.toCandidateOutcome(raw, snapshotId, candidates.length);
+      if ("candidate" in outcome) {
+        candidates.push(outcome.candidate);
+      } else {
+        filtered.set(outcome.reason, (filtered.get(outcome.reason) ?? 0) + 1);
+      }
     }
+    const status: SourceStatus =
+      candidates.length === 0 && data.errors.length > 0 ? "degraded" : "healthy";
+    const filteredStats = [...filtered].map(([reason, count]) => ({ reason, count }));
 
     return {
       id: snapshotId,
@@ -227,11 +237,17 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
       keyword,
       candidates,
       createdAt: this.now(),
+      sourceStats: [
+        {
+          name: "tgto",
+          status,
+          candidates: candidates.length,
+          ...(filteredStats.length > 0 ? { filtered: filteredStats } : {}),
+        },
+      ],
       // An empty result WITH upstream errors is not an authoritative "no such
       // resource" — say degraded so the UI/agent knows the source wobbled.
-      sourceHealth: mergeSourceHealth([
-        { status: candidates.length === 0 && data.errors.length > 0 ? "degraded" : "healthy", source: "tgto" },
-      ]),
+      sourceHealth: mergeSourceHealth([{ status, source: "tgto" }]),
     };
   }
 
@@ -240,16 +256,21 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
     return this.resolver.resolve(candidate);
   }
 
-  private toCandidate(item: TgtoSearchItem, snapshotId: string, index: number): ResourceCandidate | null {
-    if (stringValue(item.validate_status) === "invalid") return null;
+  private toCandidateOutcome(
+    item: TgtoSearchItem,
+    snapshotId: string,
+    index: number,
+  ): { candidate: ResourceCandidate } | { reason: string } {
+    if (stringValue(item.validate_status) === "invalid") return { reason: "invalid" };
 
     const targets = asArray(item.supported_targets).map((t) => stringValue(t));
-    if (targets.length > 0 && !targets.includes("115")) return null;
+    if (targets.length > 0 && !targets.includes("115")) return { reason: "target_not_115" };
 
     // points_known=false 时无法判断成本 → 当作需要积分，宁可不收也不盲扣。
     const pointsKnown = item.points_known === true;
     const unlockPoints = numberValue(item.unlock_points);
-    if (!pointsKnown || unlockPoints > this.maxPoints) return null;
+    if (!pointsKnown) return { reason: "points_unknown" };
+    if (unlockPoints > this.maxPoints) return { reason: "points_over_cap" };
 
     const linkType = stringValue(item.link_type).toLowerCase();
     const source = stringValue(item.source);
@@ -259,11 +280,11 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
 
     if (!directMagnet) {
       // 分享链要 slug+source 才能换链；缺任何一个这条候选都不可转。
-      if (linkType !== "share" || !slug || !source) return null;
+      if (linkType !== "share" || !slug || !source) return { reason: "no_share_ref" };
     }
 
     const title = candidateTitle(item);
-    if (!title) return null;
+    if (!title) return { reason: "no_title" };
 
     const ref: TgtoCandidateRef | undefined = directMagnet
       ? undefined
@@ -271,21 +292,23 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
     const datetime = stringValue(item.published_at).slice(0, 10);
 
     return {
-      id: `${snapshotId}:${index}`,
-      snapshotId,
-      index,
-      title,
-      type: directMagnet ? "magnet" : "115",
-      source: "tgto",
-      providerPayload: {
-        title: stringValue(item.title) || title,
-        // 磁力直接带链接；分享链故意留空，转存时由 resolver 调 copy-link。
-        ...(directMagnet ? { url: shareUrl, ...(infoHashOf(shareUrl) ? { infoHash: infoHashOf(shareUrl) } : {}) } : {}),
-        ...(ref ? { [TGTO_PAYLOAD_KEY]: ref, targetProvider: "115" } : {}),
-        sizeBytes: parseSizeToBytes(stringValue(item.size)),
-        resolution: stringValue(item.resolution),
-        unlockPoints,
-        ...(datetime.length === 10 ? { datetime } : {}),
+      candidate: {
+        id: `${snapshotId}:${index}`,
+        snapshotId,
+        index,
+        title,
+        type: directMagnet ? "magnet" : "115",
+        source: "tgto",
+        providerPayload: {
+          title: stringValue(item.title) || title,
+          // 磁力直接带链接；分享链故意留空，转存时由 resolver 调 copy-link。
+          ...(directMagnet ? { url: shareUrl, ...(infoHashOf(shareUrl) ? { infoHash: infoHashOf(shareUrl) } : {}) } : {}),
+          ...(ref ? { [TGTO_PAYLOAD_KEY]: ref, targetProvider: "115" } : {}),
+          sizeBytes: parseSizeToBytes(stringValue(item.size)),
+          resolution: stringValue(item.resolution),
+          unlockPoints,
+          ...(datetime.length === 10 ? { datetime } : {}),
+        },
       },
     };
   }

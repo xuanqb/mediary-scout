@@ -127,6 +127,28 @@ describe("TgtoResourceProvider", () => {
     ]));
     const snapshot = await p.search({ keyword: "沙丘" });
     expect(snapshot.candidates).toHaveLength(0);
+    // A 0-result source must stay explainable: the trace shows these reasons.
+    expect(snapshot.sourceStats).toEqual([
+      {
+        name: "tgto",
+        status: "healthy",
+        candidates: 0,
+        filtered: [
+          { reason: "points_unknown", count: 1 },
+          { reason: "invalid", count: 1 },
+          { reason: "target_not_115", count: 1 },
+          { reason: "no_share_ref", count: 1 },
+        ],
+      },
+    ]);
+  });
+
+  it("reports kept candidates and omits the filter list when nothing was dropped", async () => {
+    const p = provider(async () => okResponse([shareItem(), magnetItem()]));
+    const snapshot = await p.search({ keyword: "沙丘" });
+    expect(snapshot.sourceStats).toEqual([
+      { name: "tgto", status: "healthy", candidates: 2 },
+    ]);
   });
 
   it("sends tmdb identity + season and does not send season for a multi-season task", async () => {

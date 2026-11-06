@@ -1,11 +1,11 @@
 import type {
   AgentDecision,
-  AgentStep,
   AuditEvent,
   MediaTitle,
   MergedSourceHealth,
   NotificationEvent,
   ResourceSnapshot,
+  ResourceSourceStat,
   SnapshotPrefilter,
   TrackedSeason,
   TransferAttempt,
@@ -39,7 +39,6 @@ export interface RunTrace {
     startEpisode: number | null;
   };
   summary: RunTraceSummary;
-  steps: RunTraceStep[];
   candidates: RunTraceCandidate[];
   searches: RunTraceSearch[];
   decisions: RunTraceDecision[];
@@ -58,16 +57,6 @@ export interface RunTraceSummary {
   transferSucceeded: number;
   transferFailed: number;
   transferNoChange: number;
-}
-
-export interface RunTraceStep {
-  ordinal: number;
-  toolName: string;
-  activity: string;
-  phase: AgentStep["phase"];
-  at: string;
-  apiCalls?: number;
-  args: Record<string, unknown>;
 }
 
 export interface RunTraceCandidate {
@@ -89,6 +78,8 @@ export interface RunTraceSearch {
   createdAt: string;
   candidateIds: string[];
   sourceHealth: MergedSourceHealth | null;
+  /** Per-provider contribution (composite). null on legacy snapshots. */
+  sourceStats: ResourceSourceStat[] | null;
   prefilter: SnapshotPrefilter | null;
 }
 
@@ -130,7 +121,7 @@ export interface RunTraceNotification {
 /** Read a run's full trace. Returns null when the run is invisible in `scope`
  *  (wrong account/drive, or already pruned) — the caller maps that to a 404. */
 export async function getRunTrace(input: {
-  repository: Pick<WorkflowRepository, "getWorkflowRunSnapshot" | "listAgentSteps">;
+  repository: Pick<WorkflowRepository, "getWorkflowRunSnapshot">;
   runId: string;
   scope?: ScopeArg;
 }): Promise<RunTrace | null> {
@@ -138,7 +129,6 @@ export async function getRunTrace(input: {
   if (!snapshot) {
     return null;
   }
-  const steps = await input.repository.listAgentSteps(input.runId, input.scope);
 
   const candidates = uniqueCandidates(snapshot.resourceSnapshots);
   const candidateIds = new Set(candidates.map((candidate) => candidate.id));
@@ -179,7 +169,6 @@ export async function getRunTrace(input: {
       transferFailed: snapshot.transferAttempts.filter((a) => a.status === "failed").length,
       transferNoChange: snapshot.transferAttempts.filter((a) => a.status === "no_target_change").length,
     },
-    steps: steps.map(traceStep),
     candidates,
     searches: snapshot.resourceSnapshots
       .slice()
@@ -225,18 +214,6 @@ function uniqueCandidates(snapshots: readonly ResourceSnapshot[]): RunTraceCandi
   return [...byId.values()];
 }
 
-function traceStep(step: AgentStep): RunTraceStep {
-  return {
-    ordinal: step.ordinal,
-    toolName: step.toolName,
-    activity: step.activity,
-    phase: step.phase,
-    at: step.at,
-    ...(step.apiCalls !== undefined ? { apiCalls: step.apiCalls } : {}),
-    args: step.args,
-  };
-}
-
 function traceSearch(snapshot: ResourceSnapshot): RunTraceSearch {
   return {
     id: snapshot.id,
@@ -245,6 +222,7 @@ function traceSearch(snapshot: ResourceSnapshot): RunTraceSearch {
     createdAt: snapshot.createdAt,
     candidateIds: snapshot.candidates.map((candidate) => candidate.id),
     sourceHealth: snapshot.sourceHealth ?? null,
+    sourceStats: snapshot.sourceStats ?? null,
     prefilter: snapshot.prefilter ?? null,
   };
 }

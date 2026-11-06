@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   InMemoryWorkflowRepository,
   type AgentDecision,
-  type AgentStep,
   type MediaTitle,
   type PersistWorkflowRunSnapshotInput,
   type ResourceSnapshot,
@@ -66,6 +65,15 @@ function search(id: string, keyword: string): ResourceSnapshot {
       },
     ],
     sourceHealth: { status: "degraded", unhealthySources: ["prowlarr"] },
+    sourceStats: [
+      { name: "pansou", status: "healthy", candidates: 2 },
+      {
+        name: "tgto",
+        status: "healthy",
+        candidates: 0,
+        filtered: [{ reason: "points_unknown", count: 3 }],
+      },
+    ],
     prefilter: {
       provider: "jev",
       model: "jev-judge",
@@ -140,23 +148,24 @@ describe("getRunTrace", () => {
   it("assembles the durable audit trail into one trace", async () => {
     const repo = new InMemoryWorkflowRepository();
     await repo.saveWorkflowRunSnapshot(snapshot());
-    const steps: AgentStep[] = [
-      { ordinal: 0, toolName: "searchResources", args: { keyword: "毛雪汪 4K" }, activity: "搜索资源", phase: "search", at: "2026-06-17T00:00:01Z" },
-      { ordinal: 1, toolName: "transferCandidate", args: { candidateId: "c_snap_1_1" }, activity: "转存资源", phase: "transfer", apiCalls: 7, at: "2026-06-17T00:00:05Z" },
-    ];
-    await repo.appendAgentStep("run_1", steps[0]!);
-    await repo.appendAgentStep("run_1", steps[1]!);
 
     const trace = await getRunTrace({ repository: repo, runId: "run_1" });
 
     expect(trace).not.toBeNull();
     expect(trace!.run.status).toBe("failed");
     expect(trace!.title).toMatchObject({ tmdbId: 42, name: "毛雪汪", seasonNumber: 1, startEpisode: 3 });
-    expect(trace!.steps.map((step) => step.toolName)).toEqual(["searchResources", "transferCandidate"]);
-    expect(trace!.steps[1]!.apiCalls).toBe(7);
 
     expect(trace!.searches).toHaveLength(1);
     expect(trace!.searches[0]!.sourceHealth?.unhealthySources).toEqual(["prowlarr"]);
+    expect(trace!.searches[0]!.sourceStats).toEqual([
+      { name: "pansou", status: "healthy", candidates: 2 },
+      {
+        name: "tgto",
+        status: "healthy",
+        candidates: 0,
+        filtered: [{ reason: "points_unknown", count: 3 }],
+      },
+    ]);
     expect(trace!.searches[0]!.prefilter?.dropped).toEqual([
       { id: "c_snap_1_2", title: "毛雪汪 4K 1080p", score: 0.12 },
     ]);

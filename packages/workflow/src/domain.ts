@@ -1,4 +1,4 @@
-import type { MergedSourceHealth } from "./resource-source-health.js";
+import type { MergedSourceHealth, SourceStatus } from "./resource-source-health.js";
 
 /**
  * The implicit account that owns all data in a single-user (multi-user disabled)
@@ -197,12 +197,34 @@ export interface ResourceCandidate {
   providerPayload: Record<string, unknown>;
 }
 
+/** One reason a provider discarded raw search items before they could become
+ *  candidates (Tgto's target/points/link guards). Persisted so a 0-result source
+ *  is explainable instead of looking identical to "never searched". */
+export interface ResourceSourceFilterStat {
+  reason: string;
+  count: number;
+}
+
+/** Per-provider search contribution. Composite writes one entry per mounted
+ *  provider; a member may report its own (Tgto does) so the composite can carry
+ *  the pre-dedupe counts and the provider-internal filter breakdown. */
+export interface ResourceSourceStat {
+  name: string;
+  status: SourceStatus;
+  /** Candidates the provider produced after its own filters (before composite dedupe). */
+  candidates: number;
+  filtered?: ResourceSourceFilterStat[];
+}
+
 export interface ResourceSnapshot {
   id: string;
   provider: string;
   keyword: string;
   candidates: ResourceCandidate[];
   createdAt: string;
+  /** Per-provider contributions (composite snapshots). Absent on legacy/raw
+   *  snapshots; readers must treat absence as "unknown", never as zero. */
+  sourceStats?: ResourceSourceStat[];
   /** 本次搜索各源的健康态。可选：老快照与不关心健康态的 provider 不带此字段。
    *  缺失时按 healthy 处理（向后兼容），因此新增判定必须显式检查而非假设存在。 */
   sourceHealth?: MergedSourceHealth;
