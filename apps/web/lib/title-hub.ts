@@ -365,6 +365,12 @@ export async function getTitleHubView(tmdbId: number, storageId?: string): Promi
  * the season-shaped TitleHubView. Tracked movies resolve from the DB with no
  * TMDB round-trip; an untracked title falls through to the TV hub, then to a
  * TMDB movie lookup.
+ *
+ * `typeHint` is AUTHORITATIVE, not a tie-breaker: it comes from the card the
+ * user clicked. TMDB's movie and tv ids are separate namespaces that collide
+ * (tv 137726 = 毛雪汪, movie 137726 = 出发), so once the card says "tv" a missing
+ * tv record must never resolve to the movie with the same number — and vice
+ * versa. Cross-namespace fallback is only for legacy links with no hint.
  */
 export async function getDetailView(
   tmdbId: number,
@@ -377,7 +383,12 @@ export async function getDetailView(
   const now = new Date().toISOString();
 
   const trackedForTitle = (await repository.listTrackedSeasonStates(scope)).filter(
-    (state) => state.title.tmdbId === tmdbId,
+    (state) =>
+      state.title.tmdbId === tmdbId &&
+      // A tracked state from the OTHER namespace sharing this numeric id is an
+      // unrelated work, never this title.
+      (typeHint === undefined ||
+        (typeHint === "movie") === (state.title.type === "movie")),
   );
   const movieStates = trackedForTitle.filter((state) => state.title.type === "movie");
   if (movieStates.length > 0) {
@@ -426,9 +437,9 @@ export async function getDetailView(
   }
 
   // Untracked title: TMDB's movie/tv id namespaces collide (movie 278 ≠ tv 278).
-  // The detail page can't guess which; the card carries `typeHint`. When it says
-  // movie, resolve the MOVIE namespace FIRST — otherwise the season-shaped hub's
-  // TMDB tv lookup spuriously matches an unrelated show with the same numeric id.
+  // The card carries `typeHint`; when it says movie, resolve the MOVIE namespace
+  // — the season-shaped hub's TMDB tv lookup would spuriously match an unrelated
+  // show with the same numeric id.
   const untrackedMovie = async (): Promise<DetailView | null> => {
     const movieTarget = await movieTargetFromTmdbId(tmdbId);
     if (!movieTarget) {
@@ -439,10 +450,9 @@ export async function getDetailView(
   };
 
   if (typeHint === "movie") {
-    const movie = await untrackedMovie();
-    if (movie) {
-      return movie;
-    }
+    // No tv fallback: a film id with no film record must read 没有找到, not open
+    // an unrelated series that happens to carry the same number.
+    return untrackedMovie();
   }
 
   // Season-shaped (tv/anime) hub — same drive scope. Covers tracked tv + TMDB tv target.
@@ -450,8 +460,13 @@ export async function getDetailView(
   if (tv) {
     return tv;
   }
+  if (typeHint !== undefined) {
+    // Same rule as the movie branch: honour the card's namespace, never fall
+    // back to a same-numbered film when the tv lookup misses or fails.
+    return null;
+  }
 
-  // Last resort: a movie known to TMDB (e.g. no typeHint).
+  // Legacy link with no type hint: last resort, a movie known to TMDB.
   return untrackedMovie();
 }
 

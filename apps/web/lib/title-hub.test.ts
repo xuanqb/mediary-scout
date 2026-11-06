@@ -183,3 +183,81 @@ describe("getLibraryWall — Emby-covered gaps", () => {
   });
 });
 
+describe("getDetailView — the card's type hint owns the TMDB namespace", () => {
+  let repo: InMemoryWorkflowRepository;
+  let hub: typeof import("./title-hub");
+  let movieLookup: ((tmdbId: number) => Promise<{ title: MediaTitle; keyword: string } | null>) | null;
+
+  const movieTitle = (tmdbId: number, name: string): MediaTitle => ({
+    id: `tmdb_movie_${tmdbId}`,
+    tmdbId,
+    type: "movie",
+    title: name,
+    originalTitle: name,
+    year: 1967,
+    aliases: [],
+    posterPath: `/m${tmdbId}.jpg`,
+  });
+
+  beforeEach(async () => {
+    repo = new InMemoryWorkflowRepository();
+    movieLookup = null;
+    vi.resetModules();
+    vi.doMock("./workflow-runtime", async () => {
+      const actual = await vi.importActual<typeof import("./workflow-runtime")>("./workflow-runtime");
+      return {
+        ...actual,
+        getWorkflowRepository: () => repo,
+        getActiveWorkspaceScope: async () => scope,
+        movieTargetFromTmdbId: (...args: [number]) =>
+          movieLookup ? movieLookup(...args) : Promise.resolve(null),
+      };
+    });
+    hub = await import("./title-hub");
+  }, 30_000);
+
+  it("a tv hint never resolves to the same-numbered movie (tv 137726 毛雪汪 ≠ movie 137726 出发)", async () => {
+    movieLookup = async (tmdbId) => ({ title: movieTitle(tmdbId, "出发"), keyword: "出发" });
+
+    // No tracked state and the (offline-test) tv lookup misses → 没有找到, never 出发.
+    expect(await hub.getDetailView(137726, undefined, "tv")).toBeNull();
+  });
+
+  it("a movie hint never resolves to a same-numbered tracked tv show", async () => {
+    const show = title(278, "Nightline");
+    await saveRun(repo, show, season(show, 1), {
+      id: "seed_278",
+      kind: "type2_init",
+      status: "succeeded",
+      obtained: true,
+    });
+
+    expect(await hub.getDetailView(278, undefined, "movie")).toBeNull();
+  });
+
+  it("a tv hint ignores a tracked movie that collides on this id", async () => {
+    const film = movieTitle(278, "肖申克的救赎");
+    await saveRun(repo, film, season(film, 1), {
+      id: "seed_movie_278",
+      kind: "movie_init",
+      status: "succeeded",
+      obtained: true,
+    });
+
+    expect(await hub.getDetailView(278, undefined, "tv")).toBeNull();
+  });
+
+  it("still resolves the movie when the movie hint matches a real movie", async () => {
+    movieLookup = async (tmdbId) => ({ title: movieTitle(tmdbId, "出发"), keyword: "出发" });
+
+    const view = await hub.getDetailView(137726, undefined, "movie");
+
+    expect(view).toMatchObject({ kind: "movie", tmdbId: 137726, title: "出发", state: "untracked" });
+  });
+
+  it("legacy links without a hint keep the old tv-then-movie fallback", async () => {
+    movieLookup = async (tmdbId) => ({ title: movieTitle(tmdbId, "出发"), keyword: "出发" });
+
+    expect(await hub.getDetailView(137726)).toMatchObject({ kind: "movie", title: "出发" });
+  });
+});
