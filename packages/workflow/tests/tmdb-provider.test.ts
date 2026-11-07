@@ -1199,6 +1199,52 @@ describe("TmdbMetadataProvider multi-access fallback", () => {
     expect(seen[0]?.Authorization).toBeUndefined();
   });
 
+  it("sends a 32-hex v3 API key as ?api_key= instead of a bearer token", async () => {
+    // A v3 key pasted into the "Read Token" field used to be sent as
+    // `Authorization: Bearer <v3 key>`, and TMDB answers 401 — the air-date
+    // fallback then could never sync because every TMDB call failed.
+    const key = "0123456789abcdef0123456789abcdef";
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    const provider = new TmdbMetadataProvider({
+      accesses: [{ baseURL: "https://primary.example/3", readToken: key }],
+      fetchJson: async (url, init) => {
+        seen.push({ url, headers: init.headers });
+        return movieJson(1);
+      },
+    });
+    await provider.getMovieDetails(1);
+    expect(seen[0]?.headers.Authorization).toBeUndefined();
+    expect(new URL(seen[0]!.url).searchParams.get("api_key")).toBe(key);
+  });
+
+  it("keeps a v4 JWT read token as Authorization: Bearer (no api_key param)", async () => {
+    const token = "eyJhbGciOiJIUzI1NiJ9.payload.signature";
+    const seen: Array<{ url: string; headers: Record<string, string> }> = [];
+    const provider = new TmdbMetadataProvider({
+      accesses: [{ baseURL: "https://primary.example/3", readToken: token }],
+      fetchJson: async (url, init) => {
+        seen.push({ url, headers: init.headers });
+        return movieJson(1);
+      },
+    });
+    await provider.getMovieDetails(1);
+    expect(seen[0]?.headers.Authorization).toBe(`Bearer ${token}`);
+    expect(new URL(seen[0]!.url).searchParams.get("api_key")).toBeNull();
+  });
+
+  it("strips a pasted 'Bearer ' prefix instead of sending it twice", async () => {
+    const seen: Array<Record<string, string>> = [];
+    const provider = new TmdbMetadataProvider({
+      readToken: "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
+      fetchJson: async (_url, init) => {
+        seen.push(init.headers);
+        return movieJson(1);
+      },
+    });
+    await provider.getMovieDetails(1);
+    expect(seen[0]?.Authorization).toBe("Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature");
+  });
+
   it("still supports the legacy single readToken option", async () => {
     const seen: Array<Record<string, string>> = [];
     const provider = new TmdbMetadataProvider({

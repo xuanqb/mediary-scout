@@ -491,7 +491,7 @@ async function TmdbApiKeySection() {
         details={
           <>
             <p>
-              你在页面上看到的电影、剧集海报、简介、集数等数据，都来自 The Movie Database (TMDB)。默认由作者的代理服务兜底（已缓存、开箱即用，无需任何配置）。想更稳定可申请自己的 API Read Token 填入直连你自己的额度；调不通时会自动回退到代理。留空不改动已保存的值。
+              你在页面上看到的电影、剧集海报、简介、集数等数据，都来自 The Movie Database (TMDB)。默认由作者的代理服务兜底（已缓存、开箱即用，无需任何配置）。想更稳定可申请自己的 API Read Token（v4，eyJ…）或直接填 v3 API Key（32 位）直连你自己的额度；调不通时会自动回退到代理。留空不改动已保存的值。
             </p>
             <p>
               了解 TMDB{" "}

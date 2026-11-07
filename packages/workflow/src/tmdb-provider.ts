@@ -64,6 +64,14 @@ function normalizeAccess(access: TmdbAccess): TmdbAccess {
   return access.readToken === undefined ? { baseURL } : { baseURL, readToken: access.readToken };
 }
 
+/** TMDB v3 API keys are 32 hex chars and authenticate via `?api_key=`; v4 Read
+ *  Access Tokens are JWTs sent as `Authorization: Bearer`. Users routinely paste
+ *  the v3 key into the "Read Token" field, and TMDB answers 401 to a v3 key sent
+ *  as a bearer token — accept both shapes so a working key is not rejected. */
+function isTmdbV3ApiKey(token: string): boolean {
+  return /^[0-9a-f]{32}$/i.test(token.trim());
+}
+
 /** Try each access in order; first success wins, all-fail throws. This is the
  *  one chokepoint where user-key → proxy fallback lives.
  *
@@ -101,10 +109,16 @@ async function fetchViaAccessChain(
     (error instanceof Error && error.name === "TimeoutError") || /timeout/i.test(String(error));
   const tryOnce = async (list: TmdbAccess[]): Promise<{ ok: true; value: unknown } | { ok: false }> => {
     for (const access of list) {
-      const url = `${access.baseURL}/${path}?${new URLSearchParams(query).toString()}`;
+      // Trim before shape checks: a value pasted from .env can carry whitespace,
+      // and a copied `Bearer <token>` must not become `Bearer Bearer <token>`.
+      const token = access.readToken?.trim().replace(/^Bearer\s+/i, "").trim();
+      const v3 = token !== undefined && isTmdbV3ApiKey(token);
+      const params = new URLSearchParams(query);
+      if (v3) params.set("api_key", token);
+      const url = `${access.baseURL}/${path}?${params.toString()}`;
       const headers: Record<string, string> = { "Content-Type": "application/json;charset=utf-8" };
-      if (access.readToken !== undefined) {
-        headers.Authorization = `Bearer ${access.readToken}`;
+      if (token !== undefined && !v3) {
+        headers.Authorization = `Bearer ${token}`;
       }
       // Per-hop timeout: the DIRECT api.themoviedb.org hop keeps the fail-fast
       // budget (a GFW-blackholed connection must not stall the chain — #68/#69);
@@ -144,7 +158,8 @@ async function fetchViaAccessChain(
             : error instanceof Error
               ? `${error.name}: ${error.message}`
               : String(error);
-        console.warn(`[tmdb] access ${host} failed: ${detail.slice(0, 200)}${notFound ? " (not found)" : ""}`);
+        const authKind = token === undefined ? "" : v3 ? " (v3 api_key)" : " (bearer)";
+        console.warn(`[tmdb] access ${host}${authKind} failed: ${detail.slice(0, 200)}${notFound ? " (not found)" : ""}`);
         if (isTimeout(error)) {
           sawTimeout = true;
         }

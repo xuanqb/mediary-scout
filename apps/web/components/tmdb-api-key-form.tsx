@@ -68,7 +68,7 @@ export function TmdbApiKeyForm({ apiKeySet }: { apiKeySet: boolean }) {
           className="setting-control"
           value={apiKey}
           onChange={(event) => setApiKey(event.target.value)}
-          placeholder={hasKey ? "已设置(留空不改)" : "TMDB API Read Token（eyJhbGciOi…）"}
+          placeholder={hasKey ? "已设置(留空不改)" : "v4 Read Token（eyJhbGciOi…）或 v3 API Key（32 位）"}
           aria-label="TMDB API Key"
           autoComplete="off"
         />
