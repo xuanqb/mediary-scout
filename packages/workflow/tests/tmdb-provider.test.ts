@@ -1105,20 +1105,25 @@ describe("TmdbMetadataProvider multi-access fallback", () => {
     await expect(provider.getMovieDetails(999999999)).rejects.toBeInstanceOf(TmdbNotFoundError);
   });
 
-  it("keeps a 404 + non-404 HTTP answer retryable (conflicting chain)", async () => {
-    const provider = new TmdbMetadataProvider({
-      accesses: [
-        { baseURL: "https://primary.example/3", readToken: "userkey" },
-        { baseURL: "https://proxy.example" },
-      ],
-      fetchJson: async (url) => {
-        if (url.startsWith("https://primary.example")) throw new TmdbHttpError("TMDB HTTP 503", 503);
-        throw new TmdbHttpError("TMDB request failed with HTTP 404", 404);
-      },
-    });
-    const attempt = provider.getMovieDetails(278);
-    await expect(attempt).rejects.not.toBeInstanceOf(TmdbNotFoundError);
-    await expect(attempt).rejects.toThrow(/failed/i);
+  it("treats a 404 as not-found even when another access answers with a non-404 error", async () => {
+    // A broken token (401/403) or flaky proxy (5xx) must not turn an
+    // authoritative 404 into a retryable "network" failure — USAPI would waste
+    // three retries on a missing movie/season.
+    for (const status of [401, 403, 503]) {
+      const provider = new TmdbMetadataProvider({
+        accesses: [
+          { baseURL: "https://primary.example/3", readToken: "userkey" },
+          { baseURL: "https://proxy.example" },
+        ],
+        fetchJson: async (url) => {
+          if (url.startsWith("https://primary.example")) {
+            throw new TmdbHttpError(`TMDB HTTP ${status}`, status);
+          }
+          throw new TmdbHttpError("TMDB request failed with HTTP 404", 404);
+        },
+      });
+      await expect(provider.getMovieDetails(278)).rejects.toBeInstanceOf(TmdbNotFoundError);
+    }
   });
 
   it("sends Authorization only when the access has a readToken", async () => {

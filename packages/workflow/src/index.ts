@@ -65,6 +65,7 @@ export * from "./acquisition-v2/search-profile.js";
 export * from "./acquisition-v2/activity.js";
 export * from "./acquisition-v2/repetition-stop.js";
 export * from "./acquisition-v2/agent-loop-guards.js";
+export * from "./acquisition-v2/transient-error.js";
 export * from "./acquisition-v2/candidate-registry.js";
 export * from "./acquisition-v2/real-provider-adapter.js";
 export * from "./acquisition-v2/real-storage-adapter.js";

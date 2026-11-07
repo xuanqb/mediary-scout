@@ -87,13 +87,12 @@ async function fetchViaAccessChain(
   let lastError: unknown = new Error("no TMDB access configured");
   let sawTimeout = false;
   // A 404 is an authoritative answer from a live TMDB access: the resource is
-  // absent. One access returning 404 while another fails at the transport layer
-  // (fetch failed / timeout) must still surface as not-found — otherwise the
-  // caller retries a missing movie/season as if it were a transient outage.
+  // absent. One access returning 404 while another fails (transport error,
+  // 401/403 on a broken token, 5xx from a flaky proxy) must still surface as
+  // not-found — otherwise the caller retries a missing movie/season as if it
+  // were a transient outage. Only a successful response ends the chain, so at
+  // this point no access has contradicted the 404 with actual data.
   let sawNotFound = false;
-  // Another access answered with a non-404 HTTP status — the chain has
-  // conflicting answers, so a 404 alone is not decisive; keep it retryable.
-  let sawConflictingStatus = false;
   // NUL sentinel for a token-less access (undefined) so it never collides with a
   // real (even empty-string) token on the same host — the function treats those
   // distinctly when setting Authorization, and the dead key must too.
@@ -128,9 +127,24 @@ async function fetchViaAccessChain(
         const notFound = error instanceof TmdbHttpError && error.status === 404;
         if (notFound) {
           sawNotFound = true;
-        } else if (error instanceof TmdbHttpError) {
-          sawConflictingStatus = true;
         }
+        // Per-access diagnostic: a 404 next to a dead access used to be
+        // indistinguishable from a missing resource. Log the host + status (never
+        // the token) so a misconfigured access is visible without source access.
+        const host = (() => {
+          try {
+            return new URL(access.baseURL).host;
+          } catch {
+            return access.baseURL;
+          }
+        })();
+        const detail =
+          error instanceof TmdbHttpError
+            ? `HTTP ${error.status}`
+            : error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error);
+        console.warn(`[tmdb] access ${host} failed: ${detail.slice(0, 200)}${notFound ? " (not found)" : ""}`);
         if (isTimeout(error)) {
           sawTimeout = true;
         }
@@ -158,7 +172,7 @@ async function fetchViaAccessChain(
       return second.value;
     }
   }
-  if (sawNotFound && !sawConflictingStatus) {
+  if (sawNotFound) {
     throw new TmdbNotFoundError(`TMDB returned HTTP 404 for ${path}`);
   }
   throw new Error(`All ${candidates.length} TMDB access(es) failed: ${String(lastError)}`);

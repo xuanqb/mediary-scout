@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { IngestRequestError, parseIngestCreate } from "./service";
+import { TmdbHttpError, TmdbNotFoundError } from "@media-track/workflow";
+import { IngestRequestError, parseIngestCreate, taskErrorForCreate } from "./service";
 
 const movieBody = {
   request_id: "usapi-20261106-8f3c2a",
@@ -50,5 +51,29 @@ describe("parseIngestCreate", () => {
     expect(() =>
       parseIngestCreate({ ...movieBody, media: { ...movieBody.media, tmdb_id: "tt0111161" } }),
     ).toThrow(IngestRequestError);
+  });
+});
+
+describe("taskErrorForCreate", () => {
+  it("maps a TMDB 404 to a non-retryable not-found code", () => {
+    expect(taskErrorForCreate(new TmdbNotFoundError("TMDB returned HTTP 404 for movie/999999999"), "movie")).toMatchObject({
+      code: "MEDIA_NOT_FOUND",
+      retryable: false,
+    });
+    expect(taskErrorForCreate(new TmdbNotFoundError("TMDB returned HTTP 404 for tv/1/season/99"), "series")).toMatchObject({
+      code: "SEASON_NOT_FOUND",
+      retryable: false,
+    });
+  });
+
+  it("maps transport and TMDB-side failures to the retryable TEMPORARY_FAILURE", () => {
+    expect(taskErrorForCreate(new TypeError("fetch failed"), "movie")).toMatchObject({
+      code: "TEMPORARY_FAILURE",
+      retryable: true,
+    });
+    expect(taskErrorForCreate(new TmdbHttpError("TMDB HTTP 503", 503), "movie")).toMatchObject({
+      code: "TEMPORARY_FAILURE",
+      retryable: true,
+    });
   });
 });

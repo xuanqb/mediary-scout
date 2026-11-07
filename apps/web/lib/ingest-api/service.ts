@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_ACCOUNT_ID,
+  TmdbHttpError,
   TmdbNotFoundError,
   createTmdbMetadataProvider,
   episodeCode,
   episodeNumberFromCode,
   ingestPayloadSignature,
   isTerminalIngestStatus,
+  isTransientAcquisitionError,
   libraryCategoryOf,
   prepareMovieTarget,
   prepareTrackingTarget,
@@ -400,7 +402,7 @@ async function queueTask(input: {
   });
 }
 
-function taskErrorForCreate(error: unknown, mediaType: IngestMediaType): IngestTaskError {
+export function taskErrorForCreate(error: unknown, mediaType: IngestMediaType): IngestTaskError {
   if (error instanceof IngestTaskFailure) return error.error;
   if (error instanceof EmbyUnavailableError) {
     return { code: "EMBY_UNAVAILABLE", message: "Emby 不可达", retryable: true };
@@ -411,6 +413,12 @@ function taskErrorForCreate(error: unknown, mediaType: IngestMediaType): IngestT
       : { code: "SEASON_NOT_FOUND", message: "TMDB 中不存在该季", retryable: false };
   }
   const message = error instanceof Error ? error.message : String(error);
+  // Transport/TMDB-side failures are the contract's TEMPORARY_FAILURE, not a
+  // service-internal error. Both are retryable, but the code USAPI sees must
+  // match the documented meaning.
+  if (isTransientAcquisitionError(error) || error instanceof TmdbHttpError) {
+    return { code: "TEMPORARY_FAILURE", message: message.slice(0, 500), retryable: true };
+  }
   return { code: "INTERNAL_ERROR", message: message.slice(0, 500), retryable: true };
 }
 

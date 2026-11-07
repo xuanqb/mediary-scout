@@ -253,7 +253,7 @@ GET http://192.168.123.148:3000/api/v1/ingest/tasks/{task_id}
 | `TEMPORARY_FAILURE` | 搜索源 / TMDB / 网络临时故障 | 是 |
 | `INTERNAL_ERROR` | 服务内部错误 | 是 |
 
-TMDB 明确返回 404 时映射为 `MEDIA_NOT_FOUND`（电影）或 `SEASON_NOT_FOUND`（剧集），两者都不可重试；只有传输层失败（fetch failed / 超时）才归入 `TEMPORARY_FAILURE`。
+TMDB 明确返回 404 时映射为 `MEDIA_NOT_FOUND`（电影）或 `SEASON_NOT_FOUND`（剧集），两者都不可重试；传输层失败（fetch failed / 超时）或 TMDB/代理返回 401/403/5xx 时归入 `TEMPORARY_FAILURE`。多个 TMDB access 中只要有一个明确返回 404，就按不存在处理，不会被另一个故障 access 污染成可重试错误。
 
 USAPI 重试约定：
 
