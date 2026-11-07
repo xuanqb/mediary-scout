@@ -91,16 +91,23 @@ export function storageParentForTitle(
   return parents.tv;
 }
 
-/** Fail-open: an Emby outage must never block acquisition. */
+/** Fail-open by default: an Emby outage must never block a user's acquisition.
+ *  Provider runs (USAPI) pass `failClosed` — the contract makes an Emby outage a
+ *  run failure rather than risking duplicate transfers. */
 async function embyEpisodes(
   resolver: ResolveEmbyAvailability | undefined,
   title: MediaTitle,
   seasons: number[],
+  failClosed = false,
 ): Promise<string[]> {
-  if (!resolver) return [];
+  if (!resolver) {
+    if (failClosed) throw new Error("EMBY_UNAVAILABLE: network error while querying Emby (not configured)");
+    return [];
+  }
   try {
     return await resolver({ title, seasons });
   } catch (error) {
+    if (failClosed) throw error;
     console.warn(
       `[emby] availability lookup failed for ${title.title}: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -108,20 +115,35 @@ async function embyEpisodes(
   }
 }
 
-/** Fail-open: an Emby outage must never block movie acquisition. */
+/** Fail-open by default; provider runs fail closed (see embyEpisodes). */
 async function movieInEmbySafely(
   resolver: ResolveMovieInEmby | undefined,
   title: MediaTitle,
+  failClosed = false,
 ): Promise<boolean> {
-  if (!resolver) return false;
+  if (!resolver) {
+    if (failClosed) throw new Error("EMBY_UNAVAILABLE: network error while querying Emby (not configured)");
+    return false;
+  }
   try {
     return await resolver({ title });
   } catch (error) {
+    if (failClosed) throw error;
     console.warn(
       `[emby] movie lookup failed for ${title.title}: ${error instanceof Error ? error.message : String(error)}`,
     );
     return false;
   }
+}
+
+/** The run's quality guidance: a provider task's per-request preference wins
+ *  over the account default. Undefined = no guidance. */
+function qualityOption(
+  season: { providerQuality?: "high" | "medium" },
+  deps: { qualityPreference?: "high" | "medium" | undefined },
+): { qualityPreference?: "high" | "medium" } {
+  const value = season.providerQuality ?? deps.qualityPreference;
+  return value === undefined ? {} : { qualityPreference: value };
 }
 
 async function afterRunSafely(hook: (() => Promise<void>) | undefined): Promise<void> {
@@ -149,6 +171,7 @@ export async function resolveWorkerDeps(
     resourceProvider: ResourceProvider;
     model: LanguageModel;
   },
+  options?: { providerMode?: boolean },
 ): Promise<{
   storage: StorageExecutor;
   resourceProvider: ResourceProvider;
@@ -170,7 +193,9 @@ export async function resolveWorkerDeps(
   varietyStorageParentDirectoryId: string | undefined;
   drives: AcquisitionDriveContext[] | undefined;
 }> {
-  const ctx = resolve ? await resolve(accountId, connectedStorageId) : {};
+  const ctx = resolve
+    ? await resolve(accountId, connectedStorageId, { providerMode: options?.providerMode === true })
+    : {};
   return {
     storage: ctx.storage ?? base.storage,
     resourceProvider: ctx.resourceProvider ?? base.resourceProvider,
@@ -276,6 +301,7 @@ export interface AccountWorkerContext {
 export type ResolveAccountWorkerContext = (
   accountId: string,
   connectedStorageId?: string | null,
+  options?: { providerMode?: boolean },
 ) => Promise<AccountWorkerContext>;
 
 export type QueuedType2WorkerResult =
@@ -559,9 +585,15 @@ export async function runQueuedType2Workflow(input: {
       claimed.accountId,
       claimed.connectedStorageId,
       input,
+      { providerMode: claimed.season.providerMode === true },
     );
     resolvedLlmConfig = deps.llmConfig;
-    const emby = await embyEpisodes(deps.emby, claimed.title, [claimed.season.seasonNumber]);
+    const emby = await embyEpisodes(
+      deps.emby,
+      claimed.title,
+      [claimed.season.seasonNumber],
+      claimed.season.providerMode === true,
+    );
     const result = await runType2InitializationV2AndPersist({
       title: claimed.title,
       season: claimed.season,
@@ -586,9 +618,7 @@ export async function runQueuedType2Workflow(input: {
       ...(deps.preferredLanguage === undefined
         ? {}
         : { preferredLanguage: deps.preferredLanguage }),
-      ...(deps.qualityPreference === undefined
-        ? {}
-        : { qualityPreference: deps.qualityPreference }),
+      ...qualityOption(claimed.season, deps),
       ...(deps.storageProvider === undefined
         ? {}
         : { storageProvider: deps.storageProvider }),
@@ -837,6 +867,7 @@ async function patrolTrackedState(args: {
       state.accountId,
       state.connectedStorageId,
       input,
+      { providerMode: state.season.providerMode === true },
     );
     // Patrol dispatches by title.type: a film needs the MOVIE agent, not the
     // TV/anime agent (different semantics). (未上映/reserved films aren't tracked
@@ -943,7 +974,7 @@ async function patrolTrackedState(args: {
       return { trackedSeasonId: season.id, status: "skipped_active" };
     }
 
-    const emby = await embyEpisodes(deps.emby, state.title, [season.seasonNumber]);
+    let emby: string[] = [];
     const runOnce = () =>
       runType3MonitoringV2AndPersist({
         title: state.title,
@@ -970,9 +1001,7 @@ async function patrolTrackedState(args: {
         ...(deps.preferredLanguage === undefined
           ? {}
           : { preferredLanguage: deps.preferredLanguage }),
-        ...(deps.qualityPreference === undefined
-          ? {}
-          : { qualityPreference: deps.qualityPreference }),
+        ...qualityOption(season, deps),
         ...(deps.storageProvider === undefined
           ? {}
           : { storageProvider: deps.storageProvider }),
@@ -995,6 +1024,14 @@ async function patrolTrackedState(args: {
       });
 
     try {
+      // Provider runs fail closed: an Emby outage lands in the run's failure
+      // audit (so USAPI sees EMBY_UNAVAILABLE) instead of escaping the sweep.
+      emby = await embyEpisodes(
+        deps.emby,
+        state.title,
+        [season.seasonNumber],
+        state.season.providerMode === true,
+      );
       let result;
       try {
         result = await runOnce();
@@ -1123,9 +1160,23 @@ async function patrolMovie(args: {
   }
   // Already in Emby: don't search. The reserved run below persists the
   // availableInEmby state (once) so the UI stops calling it missing.
-  const embyPresent =
-    state.episodes.some((episode) => episode.availableInEmby) ||
-    (await movieInEmbySafely(deps.embyMovie, state.title));
+  let embyPresent = state.episodes.some((episode) => episode.availableInEmby);
+  if (!embyPresent) {
+    try {
+      embyPresent = await movieInEmbySafely(
+        deps.embyMovie,
+        state.title,
+        state.season.providerMode === true,
+      );
+    } catch (error) {
+      // A provider-mode outage must not abort the whole sweep; the next patrol
+      // retries it, and the task keeps reporting `following` meanwhile.
+      console.warn(
+        `[workflow] movie patrol Emby lookup failed for ${state.title.title}, skipping this sweep: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
   // Air-time gate: a reserved (未上映) film whose release date is still in the
   // future stays reserved — the agent must NOT run before release. Once the date
   // arrives this gate opens and the patrol collects it (点预定 → 上映后自然收).
@@ -1191,9 +1242,7 @@ async function patrolMovie(args: {
       ...(deps.preferredLanguage === undefined
         ? {}
         : { preferredLanguage: deps.preferredLanguage }),
-      ...(deps.qualityPreference === undefined
-        ? {}
-        : { qualityPreference: deps.qualityPreference }),
+      ...qualityOption(state.season, deps),
       ...(deps.storageProvider === undefined
         ? {}
         : { storageProvider: deps.storageProvider }),
@@ -1356,9 +1405,14 @@ export async function runQueuedMovieAcquisition(input: {
       claimed.accountId,
       claimed.connectedStorageId,
       input,
+      { providerMode: claimed.season.providerMode === true },
     );
     resolvedLlmConfig = deps.llmConfig;
-    const alreadyInEmby = await movieInEmbySafely(deps.embyMovie, claimed.title);
+    const alreadyInEmby = await movieInEmbySafely(
+      deps.embyMovie,
+      claimed.title,
+      claimed.season.providerMode === true,
+    );
     const result = await runMovieAcquisitionV2AndPersist({
       title: claimed.title,
       categoryParentId:
@@ -1373,9 +1427,7 @@ export async function runQueuedMovieAcquisition(input: {
       ...(deps.preferredLanguage === undefined
         ? {}
         : { preferredLanguage: deps.preferredLanguage }),
-      ...(deps.qualityPreference === undefined
-        ? {}
-        : { qualityPreference: deps.qualityPreference }),
+      ...qualityOption(claimed.season, deps),
       ...(deps.storageProvider === undefined
         ? {}
         : { storageProvider: deps.storageProvider }),
@@ -1469,6 +1521,7 @@ export async function runQueuedSeriesInitialization(input: {
       claimed.accountId,
       claimed.connectedStorageId,
       input,
+      { providerMode: claimed.season.providerMode === true },
     );
     resolvedLlmConfig = deps.llmConfig;
     if (seasons.length === 0) {
@@ -1480,6 +1533,7 @@ export async function runQueuedSeriesInitialization(input: {
       deps.emby,
       claimed.title,
       seasons.map((season) => season.seasonNumber),
+      claimed.season.providerMode === true,
     );
     const result = await runSeriesInitializationV2AndPersist({
       title: claimed.title,
@@ -1506,9 +1560,7 @@ export async function runQueuedSeriesInitialization(input: {
       ...(deps.preferredLanguage === undefined
         ? {}
         : { preferredLanguage: deps.preferredLanguage }),
-      ...(deps.qualityPreference === undefined
-        ? {}
-        : { qualityPreference: deps.qualityPreference }),
+      ...qualityOption(claimed.season, deps),
       ...(deps.storageProvider === undefined
         ? {}
         : { storageProvider: deps.storageProvider }),

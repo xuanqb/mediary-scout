@@ -117,6 +117,7 @@ import { resolveRegistration, deriveBootstrapState, canManageAccounts } from "./
 import { isDemoMode } from "./demo-mode";
 import {
   DEFAULT_EMBY_LIBRARY_NAMES,
+  EmbyUnavailableError,
   episodesInEmby,
   movieInEmby,
   refreshEmbyLibrary,
@@ -984,7 +985,12 @@ export async function runStartupMigrations(): Promise<void> {
  * PanSou) for v1 — per-account LLM/Prowlarr is a later refinement.
  */
 export function buildAccountContextResolver(): ResolveAccountWorkerContext {
-  return async (accountId: string, connectedStorageId?: string | null) => {
+  return async (
+    accountId: string,
+    connectedStorageId?: string | null,
+    options?: { providerMode?: boolean },
+  ) => {
+    const providerMode = options?.providerMode === true;
     // Per-account settings (account_settings → global → env) drive the agent
     // model, resource providers, language and quality — so each user's
     // acquisition searches with THEIR config (operator's global/env is the
@@ -1027,9 +1033,10 @@ export function buildAccountContextResolver(): ResolveAccountWorkerContext {
       llmConfig,
       ...(assrtToken === undefined ? {} : { assrtToken }),
       titleResearch,
-      emby: (input) => resolveEmbyEpisodes({ accountId, ...input }),
-      embyMovie: (input) => resolveMovieInEmby({ accountId, ...input }),
-      afterRun: () => refreshEmbyForAccount(accountId),
+      emby: (input) => resolveEmbyEpisodes({ accountId, ...input }, { failClosed: providerMode }),
+      embyMovie: (input) => resolveMovieInEmby({ accountId, ...input }, { failClosed: providerMode }),
+      // Provider tasks (USAPI) never scan: the provider owns Emby refresh.
+      afterRun: providerMode ? undefined : () => refreshEmbyForAccount(accountId),
       ...(jevJudge === undefined ? {} : { jevJudge }),
       agentMemory,
       ...(preferredLanguage === undefined ? {} : { preferredLanguage }),
@@ -1522,28 +1529,53 @@ export async function resolveAccountEmbyConfig(
   return getEmbyConfig(getAccountScopedSettings(accountId));
 }
 
-/** Episodes already in Emby for this title. Fail-open → [] on any error. */
-async function resolveEmbyEpisodes(input: {
-  accountId: string;
-  title: MediaTitle;
-  seasons: number[];
-}): Promise<string[]> {
+/** Episodes already in Emby for this title. Fail-open → [] on any error;
+ *  provider tasks pass `failClosed` so an Emby outage aborts the run. */
+async function resolveEmbyEpisodes(
+  input: {
+    accountId: string;
+    title: MediaTitle;
+    seasons: number[];
+  },
+  options: { failClosed?: boolean } = {},
+): Promise<string[]> {
   const config = await resolveAccountEmbyConfig(input.accountId);
-  if (!config) return [];
-  return episodesInEmby(config, {
-    tmdbId: input.title.tmdbId,
-    category: libraryCategoryOf(input.title),
-  });
+  if (!config) {
+    if (options.failClosed) {
+      throw new EmbyUnavailableError("not configured");
+    }
+    return [];
+  }
+  return episodesInEmby(
+    config,
+    {
+      tmdbId: input.title.tmdbId,
+      category: libraryCategoryOf(input.title),
+    },
+    options,
+  );
 }
 
-/** Whether this film is already in Emby. Fail-open → false. */
-async function resolveMovieInEmby(input: { accountId: string; title: MediaTitle }): Promise<boolean> {
+/** Whether this film is already in Emby. Fail-open → false by default. */
+async function resolveMovieInEmby(
+  input: { accountId: string; title: MediaTitle },
+  options: { failClosed?: boolean } = {},
+): Promise<boolean> {
   const config = await resolveAccountEmbyConfig(input.accountId);
-  if (!config) return false;
-  return movieInEmby(config, {
-    tmdbId: input.title.tmdbId,
-    category: libraryCategoryOf(input.title),
-  });
+  if (!config) {
+    if (options.failClosed) {
+      throw new EmbyUnavailableError("not configured");
+    }
+    return false;
+  }
+  return movieInEmby(
+    config,
+    {
+      tmdbId: input.title.tmdbId,
+      category: libraryCategoryOf(input.title),
+    },
+    options,
+  );
 }
 
 /** One library scan after a run landed files. No-op when Emby is unconfigured. */

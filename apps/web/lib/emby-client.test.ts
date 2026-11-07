@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_EMBY_LIBRARY_NAMES,
+  EmbyUnavailableError,
   episodesInEmby,
   movieInEmby,
   probeEmby,
@@ -114,6 +115,28 @@ describe("episodesInEmby", () => {
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
+
+  it("fails closed with EMBY_UNAVAILABLE for provider tasks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    );
+    await expect(
+      episodesInEmby(config, { tmdbId: 1399, category: "tv" }, { failClosed: true }),
+    ).rejects.toBeInstanceOf(EmbyUnavailableError);
+    await expect(
+      episodesInEmby(config, { tmdbId: 1399, category: "tv" }, { failClosed: true }),
+    ).rejects.toThrow(/EMBY_UNAVAILABLE: network error/);
+  });
+
+  it("fails closed when a configured library is missing", async () => {
+    stubFetch([["/Library/MediaFolders", { Items: [{ Id: "lib-x", Name: "别的库" }] }]]);
+    await expect(
+      episodesInEmby(config, { tmdbId: 1399, category: "tv" }, { failClosed: true }),
+    ).rejects.toBeInstanceOf(EmbyUnavailableError);
+  });
 });
 
 describe("movieInEmby", () => {
@@ -125,6 +148,18 @@ describe("movieInEmby", () => {
     ]);
     expect(await movieInEmby(config, { tmdbId: 603 })).toBe(true);
     expect(await movieInEmby(config, { tmdbId: 604 })).toBe(false);
+  });
+
+  it("fails closed for provider tasks", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("down");
+      }),
+    );
+    await expect(
+      movieInEmby(config, { tmdbId: 603 }, { failClosed: true }),
+    ).rejects.toBeInstanceOf(EmbyUnavailableError);
   });
 });
 

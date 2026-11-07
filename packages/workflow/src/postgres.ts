@@ -58,6 +58,7 @@ import type {
   UpsertConnectedStorageInput,
 } from "./account-credentials.js";
 import { normalizeScope, scopeMatches, type ScopeArg, type WorkflowScope } from "./workflow-scope.js";
+import type { IngestTask } from "./ingest-tasks.js";
 import { MAGNET_DEAD_LINK_TTL_MS, type DeadLink } from "./acquisition-v2/dead-links.js";
 import {
   agentMemoryFromRow,
@@ -286,6 +287,31 @@ const SCHEMA = `
     recorded_at text NOT NULL,
     PRIMARY KEY (tracked_season_id, episode_code, storage_id)
   );
+  CREATE TABLE IF NOT EXISTS ingest_tasks (
+    id text PRIMARY KEY,
+    request_id text NOT NULL UNIQUE,
+    account_id text NOT NULL DEFAULT 'acct_default',
+    tmdb_id bigint NOT NULL,
+    media_type text NOT NULL,
+    season_number integer,
+    year integer NOT NULL,
+    title text NOT NULL,
+    status text NOT NULL,
+    message text,
+    already_exists boolean NOT NULL DEFAULT false,
+    reason text,
+    error_code text,
+    error_message text,
+    error_retryable boolean,
+    workflow_run_id text,
+    tracked_season_id text,
+    connected_storage_id text,
+    payload_signature text NOT NULL DEFAULT '',
+    created_at text NOT NULL,
+    updated_at text NOT NULL,
+    finished_at text
+  );
+  CREATE INDEX IF NOT EXISTS ingest_tasks_status ON ingest_tasks (status);
   ALTER TABLE tracked_seasons ADD COLUMN IF NOT EXISTS account_id text NOT NULL DEFAULT 'acct_default';
   ALTER TABLE workflow_runs ADD COLUMN IF NOT EXISTS account_id text NOT NULL DEFAULT 'acct_default';
   ALTER TABLE tracked_seasons ADD COLUMN IF NOT EXISTS connected_storage_id text;
@@ -401,6 +427,43 @@ function storageFromColumn(raw: unknown): string | null {
   const value = (raw as string | null | undefined) ?? null;
   return value === UNSCOPED_STORAGE ? null : value;
 }
+
+function ingestTaskFromRow(row: Record<string, unknown>): IngestTask {
+  const errorCode = row.error_code as string | null;
+  return {
+    id: String(row.id),
+    requestId: String(row.request_id),
+    accountId: String(row.account_id),
+    tmdbId: Number(row.tmdb_id),
+    mediaType: String(row.media_type) as IngestTask["mediaType"],
+    seasonNumber: row.season_number === null || row.season_number === undefined ? null : Number(row.season_number),
+    year: Number(row.year),
+    title: String(row.title),
+    status: String(row.status) as IngestTask["status"],
+    message: (row.message as string | null) ?? null,
+    alreadyExists: row.already_exists === true,
+    reason: (row.reason as IngestTask["reason"]) ?? null,
+    error: errorCode
+      ? {
+          code: errorCode,
+          message: String(row.error_message ?? ""),
+          retryable: row.error_retryable === true,
+        }
+      : null,
+    workflowRunId: (row.workflow_run_id as string | null) ?? null,
+    trackedSeasonId: (row.tracked_season_id as string | null) ?? null,
+    connectedStorageId: (row.connected_storage_id as string | null) ?? null,
+    payloadSignature: String(row.payload_signature ?? ""),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at),
+    finishedAt: (row.finished_at as string | null) ?? null,
+  };
+}
+
+const INGEST_TASK_COLUMNS =
+  "id, request_id, account_id, tmdb_id, media_type, season_number, year, title, status, message, " +
+  "already_exists, reason, error_code, error_message, error_retryable, workflow_run_id, " +
+  "tracked_season_id, connected_storage_id, payload_signature, created_at, updated_at, finished_at";
 
 function isPermanentSchemaInitError(error: unknown): boolean {
   const code = (error as { code?: unknown } | null | undefined)?.code;
@@ -1272,6 +1335,98 @@ export class PostgresWorkflowRepository implements WorkflowRepository {
   async deleteSetting(key: string): Promise<void> {
     await this.ensureSchema();
     await this.pool.query("DELETE FROM app_settings WHERE key = $1", [key]);
+  }
+
+  async getIngestTask(taskId: string): Promise<IngestTask | null> {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      `SELECT ${INGEST_TASK_COLUMNS} FROM ingest_tasks WHERE id = $1`,
+      [taskId],
+    );
+    return result.rows[0] ? ingestTaskFromRow(result.rows[0]) : null;
+  }
+
+  async getIngestTaskByRequestId(requestId: string): Promise<IngestTask | null> {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      `SELECT ${INGEST_TASK_COLUMNS} FROM ingest_tasks WHERE request_id = $1`,
+      [requestId],
+    );
+    return result.rows[0] ? ingestTaskFromRow(result.rows[0]) : null;
+  }
+
+  async createIngestTask(task: IngestTask): Promise<{ task: IngestTask; created: boolean }> {
+    await this.ensureSchema();
+    const result = await this.pool.query(
+      "INSERT INTO ingest_tasks (" +
+        `${INGEST_TASK_COLUMNS}` +
+        ") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22) " +
+        "ON CONFLICT (request_id) DO NOTHING RETURNING " +
+        INGEST_TASK_COLUMNS,
+      [
+        task.id,
+        task.requestId,
+        task.accountId,
+        task.tmdbId,
+        task.mediaType,
+        task.seasonNumber,
+        task.year,
+        task.title,
+        task.status,
+        task.message,
+        task.alreadyExists,
+        task.reason,
+        task.error?.code ?? null,
+        task.error?.message ?? null,
+        task.error?.retryable ?? null,
+        task.workflowRunId,
+        task.trackedSeasonId,
+        task.connectedStorageId,
+        task.payloadSignature,
+        task.createdAt,
+        task.updatedAt,
+        task.finishedAt,
+      ],
+    );
+    if (result.rows[0]) {
+      return { task: ingestTaskFromRow(result.rows[0]), created: true };
+    }
+    const existing = await this.getIngestTaskByRequestId(task.requestId);
+    if (!existing) {
+      throw new Error("INGEST_TASK_CONFLICT: request_id row vanished after duplicate insert");
+    }
+    return { task: existing, created: false };
+  }
+
+  async pruneIngestTasks(olderThan: string): Promise<number> {
+    await this.ensureSchema();
+    const result = await this.pool.query("DELETE FROM ingest_tasks WHERE created_at < $1", [olderThan]);
+    return result.rowCount ?? 0;
+  }
+
+  async updateIngestTask(task: IngestTask): Promise<void> {
+    await this.ensureSchema();
+    await this.pool.query(
+      "UPDATE ingest_tasks SET status = $2, message = $3, already_exists = $4, reason = $5, " +
+        "error_code = $6, error_message = $7, error_retryable = $8, workflow_run_id = $9, " +
+        "tracked_season_id = $10, connected_storage_id = $11, updated_at = $12, finished_at = $13 " +
+        "WHERE id = $1",
+      [
+        task.id,
+        task.status,
+        task.message,
+        task.alreadyExists,
+        task.reason,
+        task.error?.code ?? null,
+        task.error?.message ?? null,
+        task.error?.retryable ?? null,
+        task.workflowRunId,
+        task.trackedSeasonId,
+        task.connectedStorageId,
+        task.updatedAt,
+        task.finishedAt,
+      ],
+    );
   }
 
   async getAccountSetting(accountId: string, key: string): Promise<string | null> {

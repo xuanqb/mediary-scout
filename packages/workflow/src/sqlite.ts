@@ -27,6 +27,7 @@ import type {
   WorkflowRunProgress,
 } from "./domain.js";
 import type { DeadLink } from "./acquisition-v2/dead-links.js";
+import type { IngestTask } from "./ingest-tasks.js";
 import {
   agentMemoryFromRow,
   agentMemoryTitleKeyColumn,
@@ -112,6 +113,62 @@ import type {
  * needs the FINAL shape up front, not the migration steps. The acct_default seed row
  * matches Postgres so later tasks behave identically.
  */
+interface IngestTaskRow {
+  id: string;
+  request_id: string;
+  account_id: string;
+  tmdb_id: number;
+  media_type: string;
+  season_number: number | null;
+  year: number;
+  title: string;
+  status: string;
+  message: string | null;
+  already_exists: number;
+  reason: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  error_retryable: number | null;
+  workflow_run_id: string | null;
+  tracked_season_id: string | null;
+  connected_storage_id: string | null;
+  payload_signature: string;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
+function ingestTaskFromRow(row: IngestTaskRow): IngestTask {
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    accountId: row.account_id,
+    tmdbId: row.tmdb_id,
+    mediaType: row.media_type as IngestTask["mediaType"],
+    seasonNumber: row.season_number ?? null,
+    year: row.year,
+    title: row.title,
+    status: row.status as IngestTask["status"],
+    message: row.message ?? null,
+    alreadyExists: row.already_exists === 1,
+    reason: (row.reason as IngestTask["reason"]) ?? null,
+    error: row.error_code
+      ? {
+          code: row.error_code,
+          message: row.error_message ?? "",
+          retryable: row.error_retryable === 1,
+        }
+      : null,
+    workflowRunId: row.workflow_run_id ?? null,
+    trackedSeasonId: row.tracked_season_id ?? null,
+    connectedStorageId: row.connected_storage_id ?? null,
+    payloadSignature: row.payload_signature ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at ?? null,
+  };
+}
+
 export const SQLITE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS media_titles (
     id text PRIMARY KEY,
@@ -306,6 +363,31 @@ export const SQLITE_SCHEMA = `
     recorded_at text NOT NULL,
     PRIMARY KEY (tracked_season_id, episode_code, storage_id)
   );
+  CREATE TABLE IF NOT EXISTS ingest_tasks (
+    id text PRIMARY KEY,
+    request_id text NOT NULL UNIQUE,
+    account_id text NOT NULL DEFAULT 'acct_default',
+    tmdb_id integer NOT NULL,
+    media_type text NOT NULL,
+    season_number integer,
+    year integer NOT NULL,
+    title text NOT NULL,
+    status text NOT NULL,
+    message text,
+    already_exists integer NOT NULL DEFAULT 0,
+    reason text,
+    error_code text,
+    error_message text,
+    error_retryable integer,
+    workflow_run_id text,
+    tracked_season_id text,
+    connected_storage_id text,
+    payload_signature text NOT NULL DEFAULT '',
+    created_at text NOT NULL,
+    updated_at text NOT NULL,
+    finished_at text
+  );
+  CREATE INDEX IF NOT EXISTS ingest_tasks_status ON ingest_tasks (status);
   INSERT INTO accounts (id, username, password_hash, is_owner, created_at)
     VALUES ('acct_default', 'default', '', 1, '1970-01-01T00:00:00.000Z')
     ON CONFLICT (id) DO NOTHING;
@@ -1423,6 +1505,92 @@ export class SqliteWorkflowRepository implements WorkflowRepository {
 
   async deleteSetting(key: string): Promise<void> {
     this.db.prepare("DELETE FROM app_settings WHERE key = ?").run(key);
+  }
+
+  async getIngestTask(taskId: string): Promise<IngestTask | null> {
+    const row = this.db.prepare("SELECT * FROM ingest_tasks WHERE id = ?").get(taskId) as
+      | IngestTaskRow
+      | undefined;
+    return row ? ingestTaskFromRow(row) : null;
+  }
+
+  async getIngestTaskByRequestId(requestId: string): Promise<IngestTask | null> {
+    const row = this.db.prepare("SELECT * FROM ingest_tasks WHERE request_id = ?").get(requestId) as
+      | IngestTaskRow
+      | undefined;
+    return row ? ingestTaskFromRow(row) : null;
+  }
+
+  async createIngestTask(task: IngestTask): Promise<{ task: IngestTask; created: boolean }> {
+    const result = this.db
+      .prepare(
+        "INSERT INTO ingest_tasks (" +
+          "id, request_id, account_id, tmdb_id, media_type, season_number, year, title, status, message, " +
+          "already_exists, reason, error_code, error_message, error_retryable, workflow_run_id, " +
+          "tracked_season_id, connected_storage_id, payload_signature, created_at, updated_at, finished_at" +
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+          "ON CONFLICT (request_id) DO NOTHING",
+      )
+      .run(
+        task.id,
+        task.requestId,
+        task.accountId,
+        task.tmdbId,
+        task.mediaType,
+        task.seasonNumber,
+        task.year,
+        task.title,
+        task.status,
+        task.message,
+        task.alreadyExists ? 1 : 0,
+        task.reason,
+        task.error?.code ?? null,
+        task.error?.message ?? null,
+        task.error?.retryable === undefined ? null : task.error.retryable ? 1 : 0,
+        task.workflowRunId,
+        task.trackedSeasonId,
+        task.connectedStorageId,
+        task.payloadSignature,
+        task.createdAt,
+        task.updatedAt,
+        task.finishedAt,
+      );
+    if (result.changes > 0) {
+      return { task: structuredClone(task), created: true };
+    }
+    const existing = await this.getIngestTaskByRequestId(task.requestId);
+    if (!existing) {
+      throw new Error("INGEST_TASK_CONFLICT: request_id row vanished after duplicate insert");
+    }
+    return { task: existing, created: false };
+  }
+
+  async pruneIngestTasks(olderThan: string): Promise<number> {
+    return this.db.prepare("DELETE FROM ingest_tasks WHERE created_at < ?").run(olderThan).changes;
+  }
+
+  async updateIngestTask(task: IngestTask): Promise<void> {
+    this.db
+      .prepare(
+        "UPDATE ingest_tasks SET status = ?, message = ?, already_exists = ?, reason = ?, " +
+          "error_code = ?, error_message = ?, error_retryable = ?, workflow_run_id = ?, " +
+          "tracked_season_id = ?, connected_storage_id = ?, updated_at = ?, finished_at = ? WHERE id = ?",
+      )
+      .run(
+        task.status,
+        task.message,
+        task.alreadyExists ? 1 : 0,
+        task.reason,
+        task.error?.code ?? null,
+        task.error?.message ?? null,
+        task.error?.retryable === undefined ? null : task.error.retryable ? 1 : 0,
+        task.workflowRunId,
+        task.trackedSeasonId,
+        task.connectedStorageId,
+        task.updatedAt,
+        task.finishedAt,
+        task.id,
+      );
   }
 
   async getAccountSetting(accountId: string, key: string): Promise<string | null> {

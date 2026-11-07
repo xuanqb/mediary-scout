@@ -111,6 +111,12 @@ export interface TrackedSeason {
    *  Drives the library's 最近入库优先 order; absent until something is obtained
    *  (or for legacy rows). Patrol re-saves that obtain nothing do NOT bump it. */
   lastObtainedAt?: string;
+  /** Created by the USAPI ingest API: Emby reads fail closed, and runs never
+   *  trigger an Emby library scan (the provider owns scanning). */
+  providerMode?: boolean;
+  /** Per-request quality preference from the ingest API (`best` leaves it
+   *  unset). Overrides the account setting for this task's runs. */
+  providerQuality?: "high" | "medium";
 }
 
 /** Normalized first episode of a season's subscription (absent/invalid → 1). */

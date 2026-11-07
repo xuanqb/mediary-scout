@@ -14,6 +14,7 @@ export * from "./workflow-scope.js";
 export * from "./auth/password.js";
 export * from "./auth/session.js";
 export * from "./repository.js";
+export * from "./ingest-tasks.js";
 export * from "./resource-source-health.js";
 export * from "./postgres.js";
 export { SqliteWorkflowRepository, createSqliteWorkflowRepository } from "./sqlite.js";

@@ -49,28 +49,31 @@ export async function queueTrackingInitialization(input: {
   createWorkflowRunId?: () => string;
   now?: () => string;
   staleActiveRunTimeoutMs?: number;
+  /** USAPI provider task: run Emby reads fail-closed and skip Emby refresh. */
+  providerMode?: boolean;
 }): Promise<TrackingInitializationRequestResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const workflowRunId = input.createWorkflowRunId?.() ?? crypto.randomUUID();
   const queuedAt = now();
   const staleActiveRunStartedBefore = staleStartedBefore(queuedAt, input.staleActiveRunTimeoutMs);
+  const season = input.providerMode === true ? { ...input.season, providerMode: true } : input.season;
   const initialEpisodes = createEpisodeStates({
-    trackedSeasonId: input.season.id,
-    seasonNumber: input.season.seasonNumber,
-    totalEpisodes: input.season.totalEpisodes,
-    latestAiredEpisode: input.season.latestAiredEpisode,
+    trackedSeasonId: season.id,
+    seasonNumber: season.seasonNumber,
+    totalEpisodes: season.totalEpisodes,
+    latestAiredEpisode: season.latestAiredEpisode,
   });
 
   const reservation = await input.repository.reserveWorkflowRun({
     ...(input.accountId ? { accountId: input.accountId } : {}),
     ...(input.connectedStorageId != null ? { connectedStorageId: input.connectedStorageId } : {}),
     title: input.title,
-    season: input.season,
+    season,
     workflowRun: {
       id: workflowRunId,
       kind: "type2_init",
       status: "queued",
-      trackedSeasonId: input.season.id,
+      trackedSeasonId: season.id,
       startedAt: queuedAt,
       finishedAt: null,
       auditEvents: [
@@ -104,33 +107,33 @@ export async function queueTrackingInitialization(input: {
     return {
       status: "already_running",
       titleId: input.title.id,
-      trackedSeasonId: input.season.id,
+      trackedSeasonId: season.id,
       workflowRunId: reservation.snapshot.workflowRun.id,
       workflowStatus: reservation.snapshot.workflowRun.status,
       notification: reservation.snapshot.notifications[0] ?? null,
-      progress: summarizeEpisodeProgress(input.season, reservation.snapshot.episodes),
+      progress: summarizeEpisodeProgress(season, reservation.snapshot.episodes),
     };
   }
   if (reservation.status === "already_has_episode_state") {
     return {
       status: "already_tracked",
       titleId: input.title.id,
-      trackedSeasonId: input.season.id,
+      trackedSeasonId: season.id,
       workflowRunId: null,
       workflowStatus: null,
       notification: null,
-      progress: summarizeEpisodeProgress(input.season, reservation.episodes),
+      progress: summarizeEpisodeProgress(season, reservation.episodes),
     };
   }
 
   return {
     status: "queued",
     titleId: input.title.id,
-    trackedSeasonId: input.season.id,
+    trackedSeasonId: season.id,
     workflowRunId,
     workflowStatus: "queued",
     notification: null,
-    progress: summarizeEpisodeProgress(input.season, initialEpisodes),
+    progress: summarizeEpisodeProgress(season, initialEpisodes),
   };
 }
 
@@ -286,16 +289,28 @@ export async function queueMovieAcquisition(input: {
   createWorkflowRunId?: () => string;
   now?: () => string;
   staleActiveRunTimeoutMs?: number;
+  /** USAPI provider task: run Emby reads fail-closed and skip Emby refresh. */
+  providerMode?: boolean;
+  /** Per-request quality preference from the ingest API. */
+  providerQuality?: "high" | "medium";
 }): Promise<MovieAcquisitionRequestResult> {
   const now = input.now ?? (() => new Date().toISOString());
   const workflowRunId = input.createWorkflowRunId?.() ?? crypto.randomUUID();
   const queuedAt = now();
   const staleActiveRunStartedBefore = staleStartedBefore(queuedAt, input.staleActiveRunTimeoutMs);
-  const season = movieAnchorSeason({
+  const anchor = movieAnchorSeason({
     titleId: input.title.id,
     qualityPreference: "4K",
     storageDirectoryId: "",
   });
+  const season =
+    input.providerMode === true || input.providerQuality !== undefined
+      ? {
+          ...anchor,
+          ...(input.providerMode === true ? { providerMode: true } : {}),
+          ...(input.providerQuality === undefined ? {} : { providerQuality: input.providerQuality }),
+        }
+      : anchor;
 
   const reservation = await input.repository.reserveWorkflowRun({
     ...(input.accountId ? { accountId: input.accountId } : {}),

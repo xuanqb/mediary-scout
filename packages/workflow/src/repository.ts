@@ -53,6 +53,7 @@ import type {
   UpsertConnectedStorageInput,
 } from "./account-credentials.js";
 import { normalizeScope, scopeMatches, type ScopeArg, type WorkflowScope } from "./workflow-scope.js";
+import type { IngestTask } from "./ingest-tasks.js";
 
 /**
  * Tree model: the value stored in `connected_storage_id` for the degenerate
@@ -377,6 +378,15 @@ export interface WorkflowRepository extends DeadLinkStore, AgentMemoryStore, Use
    *  each under its owner's credentials. */
   listAllTrackedSeasonStates(): Promise<TrackedSeasonState[]>;
   listEpisodeStates(trackedSeasonId: string, scope?: ScopeArg): Promise<EpisodeState[]>;
+  /** USAPI provider tasks. `request_id` is the idempotency key. */
+  getIngestTask(taskId: string): Promise<IngestTask | null>;
+  getIngestTaskByRequestId(requestId: string): Promise<IngestTask | null>;
+  /** Insert, or return the existing row for the same request_id (created=false). */
+  createIngestTask(task: IngestTask): Promise<{ task: IngestTask; created: boolean }>;
+  /** Persist a task's mutable fields (status/message/error/run linkage/timestamps). */
+  updateIngestTask(task: IngestTask): Promise<void>;
+  /** Drop tasks created before `olderThan` (contract: 30-day retention). */
+  pruneIngestTasks(olderThan: string): Promise<number>;
   /** Most-recent-first notification feed for the (account, storage) scope. */
   listNotifications(input?: {
     limit?: number;
@@ -500,6 +510,7 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
   private readonly episodeSources = new Map<string, EpisodeSource>();
   private readonly driveSpaceCache = new Map<string, DriveSpaceCacheEntry>();
   private readonly episodeCopies = new Map<string, EpisodeCopy>();
+  private readonly ingestTasks = new Map<string, IngestTask>();
 
   async getSetting(key: string): Promise<string | null> {
     return this.settings.get(key) ?? null;
@@ -511,6 +522,41 @@ export class InMemoryWorkflowRepository implements WorkflowRepository {
 
   async deleteSetting(key: string): Promise<void> {
     this.settings.delete(key);
+  }
+
+  async getIngestTask(taskId: string): Promise<IngestTask | null> {
+    const task = this.ingestTasks.get(taskId);
+    return task ? structuredClone(task) : null;
+  }
+
+  async getIngestTaskByRequestId(requestId: string): Promise<IngestTask | null> {
+    for (const task of this.ingestTasks.values()) {
+      if (task.requestId === requestId) return structuredClone(task);
+    }
+    return null;
+  }
+
+  async createIngestTask(task: IngestTask): Promise<{ task: IngestTask; created: boolean }> {
+    const existing = await this.getIngestTaskByRequestId(task.requestId);
+    if (existing) return { task: existing, created: false };
+    this.ingestTasks.set(task.id, structuredClone(task));
+    return { task: structuredClone(task), created: true };
+  }
+
+  async updateIngestTask(task: IngestTask): Promise<void> {
+    if (!this.ingestTasks.has(task.id)) return;
+    this.ingestTasks.set(task.id, structuredClone(task));
+  }
+
+  async pruneIngestTasks(olderThan: string): Promise<number> {
+    let removed = 0;
+    for (const [id, task] of this.ingestTasks) {
+      if (task.createdAt < olderThan) {
+        this.ingestTasks.delete(id);
+        removed += 1;
+      }
+    }
+    return removed;
   }
 
   async getAccountSetting(accountId: string, key: string): Promise<string | null> {

@@ -22,6 +22,22 @@ interface EmbyItem {
   IndexNumber?: number;
 }
 
+/**
+ * A provider-mode Emby read failed. Deliberately marked as a network error so
+ * the worker's transient classifier retries it; the message also carries the
+ * `EMBY_UNAVAILABLE` code the ingest status mapper reports back to USAPI.
+ */
+export class EmbyUnavailableError extends Error {
+  constructor(detail: string) {
+    super(`EMBY_UNAVAILABLE: network error while querying Emby (${detail})`);
+    this.name = "EmbyUnavailableError";
+  }
+}
+
+function embyFailure(error: unknown): EmbyUnavailableError {
+  return new EmbyUnavailableError(error instanceof Error ? error.message : String(error));
+}
+
 function normalizeBaseUrl(raw: string): string {
   return raw.trim().replace(/\/+$/, "");
 }
@@ -82,14 +98,22 @@ export async function probeEmby(config: EmbyConfig): Promise<{ ok: boolean; mess
 }
 
 /** Episodes already present in Emby for a TMDB series (codes like S01E02).
- *  Fail-open: any error returns [] so an Emby outage never blocks acquisition. */
+ *  Fail-open by default: any error returns [] so an Emby outage never blocks a
+ *  user's acquisition. Provider tasks pass `failClosed` — an outage must abort
+ *  the run instead of risking duplicate transfers. */
 export async function episodesInEmby(
   config: EmbyConfig,
   input: { tmdbId: number; category: LibraryCategory },
+  options: { failClosed?: boolean } = {},
 ): Promise<string[]> {
   try {
     const libraryId = await findLibraryId(config, config.libraryNames[input.category]);
-    if (!libraryId) return [];
+    if (!libraryId) {
+      if (options.failClosed) {
+        throw new EmbyUnavailableError(`library "${config.libraryNames[input.category]}" not found`);
+      }
+      return [];
+    }
     const seriesId = await findIdByTmdb(config, {
       libraryId,
       itemType: "Series",
@@ -109,6 +133,9 @@ export async function episodesInEmby(
     }
     return codes;
   } catch (error) {
+    if (options.failClosed) {
+      throw error instanceof EmbyUnavailableError ? error : embyFailure(error);
+    }
     console.warn(
       `[emby] episode lookup failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -116,14 +143,21 @@ export async function episodesInEmby(
   }
 }
 
-/** Whether a film already exists in Emby. Fail-open → false. */
+/** Whether a film already exists in Emby. Fail-open → false by default. */
 export async function movieInEmby(
   config: EmbyConfig,
   input: { tmdbId: number; category?: LibraryCategory },
+  options: { failClosed?: boolean } = {},
 ): Promise<boolean> {
+  const category = input.category ?? "movies";
   try {
-    const libraryId = await findLibraryId(config, config.libraryNames[input.category ?? "movies"]);
-    if (!libraryId) return false;
+    const libraryId = await findLibraryId(config, config.libraryNames[category]);
+    if (!libraryId) {
+      if (options.failClosed) {
+        throw new EmbyUnavailableError(`library "${config.libraryNames[category]}" not found`);
+      }
+      return false;
+    }
     const movieId = await findIdByTmdb(config, {
       libraryId,
       itemType: "Movie",
@@ -131,6 +165,9 @@ export async function movieInEmby(
     });
     return movieId !== null;
   } catch (error) {
+    if (options.failClosed) {
+      throw error instanceof EmbyUnavailableError ? error : embyFailure(error);
+    }
     console.warn(
       `[emby] movie lookup failed (fail-open): ${error instanceof Error ? error.message : String(error)}`,
     );

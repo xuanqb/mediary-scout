@@ -25,6 +25,8 @@ const HANDLER_GUARDED_API_PREFIXES = [
   "/api/health",
   "/api/workflows/",
   "/api/agent/",
+  // USAPI provider API: internal network only, intentionally unauthenticated.
+  "/api/v1/ingest/",
 ];
 
 /** 经隧道的远程请求判定。与 workflow-runtime.isRemoteRequest() 保持一致：
