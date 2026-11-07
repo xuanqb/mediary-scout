@@ -76,6 +76,27 @@ describe("syncSeasonAgainstMetadata", () => {
     expect(result.episodes.find((e) => e.episodeCode === episodeCode(1, 13))?.obtained).toBe(false);
   });
 
+  it("preserves Emby-only availability across a sync instead of turning it into 缺集", () => {
+    const s = season({ latestAiredEpisode: 12, totalEpisodes: 16 });
+    const withEmby = episodes(s).map((episode) =>
+      episode.episodeCode === episodeCode(1, 11) || episode.episodeCode === episodeCode(1, 12)
+        ? { ...episode, availableInEmby: true }
+        : episode,
+    );
+    const result = syncSeasonAgainstMetadata({
+      season: s,
+      episodes: withEmby,
+      // The airing cursor advances — the exact refresh that used to rebuild the
+      // episode list and silently drop every Emby flag (凡人修仙传 E133–E198).
+      latestAiredEpisode: 14,
+      totalEpisodes: 16,
+    });
+    expect(result.changed).toBe(true);
+    expect(result.episodes.find((e) => e.episodeCode === episodeCode(1, 11))?.availableInEmby).toBe(true);
+    expect(result.episodes.find((e) => e.episodeCode === episodeCode(1, 12))?.availableInEmby).toBe(true);
+    expect(result.episodes.find((e) => e.episodeCode === episodeCode(1, 13))?.availableInEmby).toBeUndefined();
+  });
+
   it("heals an inflated aired cursor while keeping obtained episodes", () => {
     const s = season({ latestAiredEpisode: 14, totalEpisodes: 14 });
     const result = syncSeasonAgainstMetadata({

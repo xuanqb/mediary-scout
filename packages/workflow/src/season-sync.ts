@@ -63,9 +63,18 @@ export function syncSeasonAgainstMetadata(input: {
         metadataStatus: old.metadataStatus,
         airDate: old.airDate,
         title: old.title,
+        // Emby presence is evidence from OUTSIDE this season's drive. Dropping it
+        // on an aired-count refresh turns those episodes into 缺集 the UI/patrol
+        // would try to acquire again (凡人修仙传 E133–E198).
+        ...(old.availableInEmby === true ? { availableInEmby: true as const } : {}),
       };
     }
-    return { ...base, airDate: old.airDate, title: old.title };
+    return {
+      ...base,
+      airDate: old.airDate,
+      title: old.title,
+      ...(old.availableInEmby === true ? { availableInEmby: true as const } : {}),
+    };
   });
 
   // Preserve obtained provider-ahead episodes that sit beyond the (new) total.
