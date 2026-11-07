@@ -266,9 +266,15 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
       } catch (error) {
         return emptySnapshot(snapshotId, keyword, this.now(), classifySourceFailure(error));
       }
-      // Only an authoritative answer is reusable: a degraded response means an
-      // upstream sub-source failed, and a later keyword may reach it healthy.
-      if (cacheKey !== null && data.errors.length === 0) this.searchCache.set(cacheKey, data);
+      // A response that carries items is reusable even when one upstream sub-source
+      // failed: Tgto answers a work, not a keyword, so refusing it only buys another
+      // upstream call that may fail outright. 事故原形(run 2ce31cf3):「慕兰之战」回了
+      // 110 条但 re0 报错,于是没进缓存;下一次搜「199」重新打上游,整源直接 unreachable,
+      // agent 手上明明有候选却被告知一条都没取回。空结果+错误的响应仍不缓存——那不
+      // 是权威答案,让下一个关键词去重试源。
+      if (cacheKey !== null && (data.errors.length === 0 || data.items.length > 0)) {
+        this.searchCache.set(cacheKey, data);
+      }
     }
 
     const candidates: ResourceCandidate[] = [];
@@ -283,8 +289,10 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
         filtered.set(outcome.reason, (filtered.get(outcome.reason) ?? 0) + 1);
       }
     }
-    const status: SourceStatus =
-      candidates.length === 0 && data.errors.length > 0 ? "degraded" : "healthy";
+    // Any upstream sub-source error makes the evidence incomplete, even when the
+    // surviving sub-source returned plenty: calling that healthy told the agent
+    // (and the run trace) the item set was authoritative when it was not.
+    const status: SourceStatus = data.errors.length > 0 ? "degraded" : "healthy";
     const filteredStats = [...filtered].map(([reason, count]) => ({ reason, count }));
 
     return {
@@ -303,8 +311,8 @@ export class TgtoResourceProvider implements ResourceProvider, ResourceCandidate
           ...(status === "degraded" ? { error: summarizeSearchErrors(data.errors) } : {}),
         },
       ],
-      // An empty result WITH upstream errors is not an authoritative "no such
-      // resource" — say degraded so the UI/agent knows the source wobbled.
+      // A result WITH upstream errors is not authoritative — even when it has
+      // items — so say degraded and let the UI/agent know the source wobbled.
       sourceHealth: mergeSourceHealth([{ status, source: "tgto" }]),
     };
   }

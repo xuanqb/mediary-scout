@@ -325,6 +325,28 @@ describe("TgtoResourceProvider", () => {
     expect(second.sourceStats?.[0]?.cached).toBeUndefined();
   });
 
+  it("reuses a partial answer (items present, a sub-source errored) instead of re-asking a source that may fail", async () => {
+    // run 2ce31cf3: 「慕兰之战」returned 110 items while re0 errored; the next
+    // keyword re-asked upstream and the whole source came back unreachable.
+    let calls = 0;
+    const p = provider(async () => {
+      calls += 1;
+      if (calls > 1) throw new Error("connect ETIMEDOUT");
+      return { success: true, data: { items: [shareItem()], errors: ["re0 timeout"] } };
+    });
+    const context = { tmdbId: 106449, mediaType: "tv" as const };
+    const first = await p.search({ keyword: "凡人修仙传 慕兰之战", context });
+    expect(first.sourceHealth?.status).toBe("degraded");
+    expect(first.sourceStats?.[0]?.error).toContain("re0 timeout");
+
+    const second = await p.search({ keyword: "凡人修仙传 199", context });
+    expect(calls).toBe(1);
+    expect(second.candidates).toHaveLength(1);
+    expect(second.sourceStats?.[0]?.cached).toBe(true);
+    // Incomplete evidence stays labelled incomplete on reuse.
+    expect(second.sourceHealth?.status).toBe("degraded");
+  });
+
   it("searches the requested keyword, not the canonical title (Tgto ignores aliases)", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const p = provider(async (_url, init) => {
