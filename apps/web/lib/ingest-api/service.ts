@@ -24,9 +24,9 @@ import {
   type WorkflowRepository,
 } from "@media-track/workflow";
 import { EmbyUnavailableError, episodesInEmby, movieInEmby } from "../emby-client";
+import { getOwnerAccountId } from "../agent-api/owner";
 import {
   getAccountScopedSettings,
-  getOwnerAccountId,
   getTmdbAccesses,
   getWorkflowRepository,
   resolveAccountEmbyConfig,

@@ -1036,7 +1036,7 @@ export function buildAccountContextResolver(): ResolveAccountWorkerContext {
       emby: (input) => resolveEmbyEpisodes({ accountId, ...input }, { failClosed: providerMode }),
       embyMovie: (input) => resolveMovieInEmby({ accountId, ...input }, { failClosed: providerMode }),
       // Provider tasks (USAPI) never scan: the provider owns Emby refresh.
-      afterRun: providerMode ? undefined : () => refreshEmbyForAccount(accountId),
+      ...(providerMode ? {} : { afterRun: () => refreshEmbyForAccount(accountId) }),
       ...(jevJudge === undefined ? {} : { jevJudge }),
       agentMemory,
       ...(preferredLanguage === undefined ? {} : { preferredLanguage }),
