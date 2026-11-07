@@ -180,6 +180,7 @@ GET http://192.168.123.148:3000/api/v1/ingest/tasks/{task_id}
 | `202` | 创建成功（包括直接返回 `completed` / `no_resource` / `failed`） |
 | `200` | 重复提交返回原任务 / 查询成功 |
 | `400` | 参数不合法 |
+| `404` | 查询的任务不存在：`data.error_code = TASK_NOT_FOUND`，不可重试 |
 | `500` | 服务内部错误 |
 
 > 安全：不鉴权意味着该接口等价于内网管理接口。请确保 `3000` 端口只对 USAPI 所在网段开放，不做公网端口映射；如机器有多网卡，建议只监听内网地址。
@@ -235,6 +236,7 @@ GET http://192.168.123.148:3000/api/v1/ingest/tasks/{task_id}
 - Emby 查询失败 **fail-closed**：任务返回 `failed`，`error.code = EMBY_UNAVAILABLE`，不继续搜索和转存。
 - Emby 已有集只参与缺集计算，不写入巡影 `Obtained`。
 - 结合自身 `Obtained`，避免 USAPI 扫描延迟造成重复交付。
+- 剧集去重时按 TMDB ID 联合查询 电视剧 / 综艺 / 动漫 三个媒体库，不依赖双方分类口径一致；即使巡影判为动漫、USAPI 最终入库到电视剧，也能识别为已有，避免重复投递。
 
 ---
 
@@ -250,6 +252,8 @@ GET http://192.168.123.148:3000/api/v1/ingest/tasks/{task_id}
 | `SEASON_NOT_FOUND` | 季不存在 | 否 |
 | `TEMPORARY_FAILURE` | 搜索源 / TMDB / 网络临时故障 | 是 |
 | `INTERNAL_ERROR` | 服务内部错误 | 是 |
+
+TMDB 明确返回 404 时映射为 `MEDIA_NOT_FOUND`（电影）或 `SEASON_NOT_FOUND`（剧集），两者都不可重试；只有传输层失败（fetch failed / 超时）才归入 `TEMPORARY_FAILURE`。
 
 USAPI 重试约定：
 
@@ -322,6 +326,16 @@ USAPI 重试约定：
 - 分类目录：USAPI watcher 监听父目录，覆盖 `Movies` / `TV` / `Variety` / `Anime`（已确认）。
 - 订阅分工：电影 `no_resource` 后由 USAPI 走 MoviePilot 订阅；剧集由巡影继续追踪，USAPI 不订阅。
 - 联调联系人：由 USAPI 侧统一把控。
+
+### 10.1 联调建议片单
+
+优先用小体积、资源充足且尚未入库的电影，避免长时间转存和配额消耗：
+
+| 用途 | 片名 | TMDB ID | 说明 |
+|---|---|---|---|
+| 电影主用例 | 彗星来的那一夜 / Coherence | `220289` | 2014 年，约 89 分钟，115 资源多为 1–2GB |
+| 电影备选 | 这个男人来自地球 / The Man from Earth | `13363` | 2007 年，约 87 分钟，场景单一、版本体积小 |
+| 剧集用例 | 选一部刚开播或明确未开播的剧，按实际季号传 `season_number` | — | 验证 `following`、同季新集继续投递 |
 
 ---
 

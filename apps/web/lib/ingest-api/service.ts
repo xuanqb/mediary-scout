@@ -324,13 +324,37 @@ async function queueTask(input: {
       retryable: false,
     });
   }
-  const target = await prepareTrackingTarget({
-    tmdbId: parsed.tmdbId,
-    mediaType: "tv",
-    seasonNumber,
-    qualityPreference: "4K",
-    metadataProvider,
-  });
+  let target: Awaited<ReturnType<typeof prepareTrackingTarget>>;
+  try {
+    target = await prepareTrackingTarget({
+      tmdbId: parsed.tmdbId,
+      mediaType: "tv",
+      seasonNumber,
+      qualityPreference: "4K",
+      metadataProvider,
+    });
+  } catch (error) {
+    if (!(error instanceof TmdbNotFoundError)) throw error;
+    // Distinguish "this show does not exist" from "this season does not exist":
+    // the details call is the authority for the show itself.
+    try {
+      await metadataProvider.getTvDetails(parsed.tmdbId);
+    } catch (detailsError) {
+      if (detailsError instanceof TmdbNotFoundError) {
+        throw new IngestTaskFailure({
+          code: "MEDIA_NOT_FOUND",
+          message: "TMDB 中不存在该剧集",
+          retryable: false,
+        });
+      }
+      throw detailsError;
+    }
+    throw new IngestTaskFailure({
+      code: "SEASON_NOT_FOUND",
+      message: "TMDB 中不存在该季",
+      retryable: false,
+    });
+  }
   const title = target.title;
   if (title.year !== parsed.year) {
     console.warn(
@@ -345,7 +369,10 @@ async function queueTask(input: {
   const embyEpisodes = await episodesInEmby(
     embyConfig,
     { tmdbId: parsed.tmdbId, category: libraryCategoryOf(title) },
-    { failClosed: true },
+    // USAPI decides the final shelf; check every series shelf so a differing
+    // classification (animated series → our Anime vs their 电视剧) cannot hide
+    // episodes and cause a duplicate delivery.
+    { failClosed: true, categories: ["tv", "variety", "anime"] },
   );
   if (seasonCompleteInEmby(season, embyEpisodes)) {
     return terminalTask(task, "completed", {

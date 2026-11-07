@@ -86,7 +86,14 @@ async function fetchViaAccessChain(
 ): Promise<unknown> {
   let lastError: unknown = new Error("no TMDB access configured");
   let sawTimeout = false;
-  let allErrorsWereNotFound = accesses.length > 0;
+  // A 404 is an authoritative answer from a live TMDB access: the resource is
+  // absent. One access returning 404 while another fails at the transport layer
+  // (fetch failed / timeout) must still surface as not-found — otherwise the
+  // caller retries a missing movie/season as if it were a transient outage.
+  let sawNotFound = false;
+  // Another access answered with a non-404 HTTP status — the chain has
+  // conflicting answers, so a 404 alone is not decisive; keep it retryable.
+  let sawConflictingStatus = false;
   // NUL sentinel for a token-less access (undefined) so it never collides with a
   // real (even empty-string) token on the same host — the function treats those
   // distinctly when setting Authorization, and the dead key must too.
@@ -119,8 +126,10 @@ async function fetchViaAccessChain(
       } catch (error) {
         lastError = error;
         const notFound = error instanceof TmdbHttpError && error.status === 404;
-        if (!notFound) {
-          allErrorsWereNotFound = false;
+        if (notFound) {
+          sawNotFound = true;
+        } else if (error instanceof TmdbHttpError) {
+          sawConflictingStatus = true;
         }
         if (isTimeout(error)) {
           sawTimeout = true;
@@ -149,8 +158,8 @@ async function fetchViaAccessChain(
       return second.value;
     }
   }
-  if (allErrorsWereNotFound) {
-    throw new TmdbNotFoundError(`All ${candidates.length} TMDB access(es) returned HTTP 404`);
+  if (sawNotFound && !sawConflictingStatus) {
+    throw new TmdbNotFoundError(`TMDB returned HTTP 404 for ${path}`);
   }
   throw new Error(`All ${candidates.length} TMDB access(es) failed: ${String(lastError)}`);
 }

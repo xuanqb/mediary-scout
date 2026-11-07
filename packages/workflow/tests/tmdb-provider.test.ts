@@ -1091,6 +1091,36 @@ describe("TmdbMetadataProvider multi-access fallback", () => {
     await expect(provider.getMovieDetails(503)).resolves.toMatchObject({ id: 278 });
   });
 
+  it("treats a 404 as not-found when another access failed at the transport layer", async () => {
+    const provider = new TmdbMetadataProvider({
+      accesses: [
+        { baseURL: "https://primary.example/3", readToken: "userkey" },
+        { baseURL: "https://proxy.example" },
+      ],
+      fetchJson: async (url) => {
+        if (url.startsWith("https://primary.example")) throw new TypeError("fetch failed");
+        throw new TmdbHttpError("TMDB request failed with HTTP 404", 404);
+      },
+    });
+    await expect(provider.getMovieDetails(999999999)).rejects.toBeInstanceOf(TmdbNotFoundError);
+  });
+
+  it("keeps a 404 + non-404 HTTP answer retryable (conflicting chain)", async () => {
+    const provider = new TmdbMetadataProvider({
+      accesses: [
+        { baseURL: "https://primary.example/3", readToken: "userkey" },
+        { baseURL: "https://proxy.example" },
+      ],
+      fetchJson: async (url) => {
+        if (url.startsWith("https://primary.example")) throw new TmdbHttpError("TMDB HTTP 503", 503);
+        throw new TmdbHttpError("TMDB request failed with HTTP 404", 404);
+      },
+    });
+    const attempt = provider.getMovieDetails(278);
+    await expect(attempt).rejects.not.toBeInstanceOf(TmdbNotFoundError);
+    await expect(attempt).rejects.toThrow(/failed/i);
+  });
+
   it("sends Authorization only when the access has a readToken", async () => {
     const seen: Array<Record<string, string>> = [];
     const provider = new TmdbMetadataProvider({

@@ -1552,7 +1552,11 @@ async function resolveEmbyEpisodes(
       tmdbId: input.title.tmdbId,
       category: libraryCategoryOf(input.title),
     },
-    options,
+    // Provider runs must dedupe across every series shelf: USAPI may place an
+    // animated series in 电视剧 (its MoviePilot rules differ from our Anime rule).
+    options.failClosed
+      ? { ...options, categories: ["tv", "variety", "anime"] as const }
+      : options,
   );
 }
 

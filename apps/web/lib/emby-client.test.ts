@@ -137,6 +137,34 @@ describe("episodesInEmby", () => {
       episodesInEmby(config, { tmdbId: 1399, category: "tv" }, { failClosed: true }),
     ).rejects.toBeInstanceOf(EmbyUnavailableError);
   });
+
+  it("unions episodes across all series shelves regardless of our category", async () => {
+    const calls = stubFetch([
+      [
+        "/Library/MediaFolders",
+        {
+          Items: [
+            { Id: "lib-tv", Name: "电视剧" },
+            { Id: "lib-anime", Name: "动漫" },
+          ],
+        },
+      ],
+      ["AnyProviderIdEquals=Tmdb.1399", { Items: [{ Id: "series-1" }] }],
+      ["IncludeItemTypes=Episode", { Items: [{ ParentIndexNumber: 2, IndexNumber: 3 }] }],
+    ]);
+    // We classify it as Anime; USAPI might place it on the TV shelf.
+    const codes = await episodesInEmby(
+      config,
+      { tmdbId: 1399, category: "anime" },
+      { failClosed: true, categories: ["tv", "variety", "anime"] },
+    );
+    expect(codes).toEqual(["S02E03"]);
+    expect(
+      calls.some(
+        (call) => call.url.includes("IncludeItemTypes=Series") && call.url.includes("ParentId=lib-tv"),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("movieInEmby", () => {

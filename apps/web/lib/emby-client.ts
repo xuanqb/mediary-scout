@@ -100,38 +100,47 @@ export async function probeEmby(config: EmbyConfig): Promise<{ ok: boolean; mess
 /** Episodes already present in Emby for a TMDB series (codes like S01E02).
  *  Fail-open by default: any error returns [] so an Emby outage never blocks a
  *  user's acquisition. Provider tasks pass `failClosed` — an outage must abort
- *  the run instead of risking duplicate transfers. */
+ *  the run instead of risking duplicate transfers.
+ *
+ *  `categories` lets a provider task search 电视剧/综艺/动漫 together. The two
+ *  systems classify some series differently (an animated documentary, say), and
+ *  USAPI decides the FINAL shelf after it moves the files. Looking the TMDB id up
+ *  in every series shelf makes the "already in Emby" check independent of that
+ *  classification difference, so a film/series is not delivered twice. */
 export async function episodesInEmby(
   config: EmbyConfig,
   input: { tmdbId: number; category: LibraryCategory },
-  options: { failClosed?: boolean } = {},
+  options: { failClosed?: boolean; categories?: readonly LibraryCategory[] } = {},
 ): Promise<string[]> {
+  const categories = [...new Set(options.categories ?? [input.category])];
   try {
-    const libraryId = await findLibraryId(config, config.libraryNames[input.category]);
-    if (!libraryId) {
-      if (options.failClosed) {
-        throw new EmbyUnavailableError(`library "${config.libraryNames[input.category]}" not found`);
+    const codes = new Set<string>();
+    let resolvedLibraries = 0;
+    for (const category of categories) {
+      const libraryId = await findLibraryId(config, config.libraryNames[category]);
+      if (!libraryId) continue;
+      resolvedLibraries += 1;
+      const seriesId = await findIdByTmdb(config, {
+        libraryId,
+        itemType: "Series",
+        tmdbId: input.tmdbId,
+      });
+      if (!seriesId) continue;
+      const episodes = await embyGet<{ Items?: EmbyItem[] }>(
+        config,
+        `/Items?ParentId=${encodeURIComponent(seriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=IndexNumber,ParentIndexNumber&Limit=10000`,
+      );
+      for (const episode of episodes?.Items ?? []) {
+        const season = episode.ParentIndexNumber;
+        const number = episode.IndexNumber;
+        if (season === undefined || number === undefined) continue;
+        codes.add(`S${String(season).padStart(2, "0")}E${String(number).padStart(2, "0")}`);
       }
-      return [];
     }
-    const seriesId = await findIdByTmdb(config, {
-      libraryId,
-      itemType: "Series",
-      tmdbId: input.tmdbId,
-    });
-    if (!seriesId) return [];
-    const episodes = await embyGet<{ Items?: EmbyItem[] }>(
-      config,
-      `/Items?ParentId=${encodeURIComponent(seriesId)}&Recursive=true&IncludeItemTypes=Episode&Fields=IndexNumber,ParentIndexNumber&Limit=10000`,
-    );
-    const codes: string[] = [];
-    for (const episode of episodes?.Items ?? []) {
-      const season = episode.ParentIndexNumber;
-      const number = episode.IndexNumber;
-      if (season === undefined || number === undefined) continue;
-      codes.push(`S${String(season).padStart(2, "0")}E${String(number).padStart(2, "0")}`);
+    if (options.failClosed && resolvedLibraries === 0) {
+      throw new EmbyUnavailableError(`libraries ${categories.join("/")} not found`);
     }
-    return codes;
+    return [...codes];
   } catch (error) {
     if (options.failClosed) {
       throw error instanceof EmbyUnavailableError ? error : embyFailure(error);
