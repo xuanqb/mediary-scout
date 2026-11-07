@@ -419,6 +419,9 @@ export async function runAcquisitionAgent(
       : {}),
   });
   const maxSteps = request.maxSteps ?? DEFAULT_MAX_STEPS;
+  /** A focused organize/mark/finish pass after the main loop, granted only when a
+   *  transfer landed but coverage is still unmet (premature finish / step cap). */
+  const POST_LOOP_RECOVERY_STEPS = 8;
   const generateAgentTurn = (system: string, prompt: string, toolSet: ToolSet, stepLimit: number) =>
     generateText({
       model: request.model,
@@ -458,6 +461,7 @@ export async function runAcquisitionAgent(
   let steps = Math.max(result.steps?.length ?? 0, result.finishReason === "content-filter" ? 1 : 0);
   let totalUsageTokens = result.totalUsage?.totalTokens;
   let peakInputTokens = peakInputTokensOf(result);
+  let recoveryAttempted = false;
   // A provider content filter can terminate a model response after it has already
   // transferred a resource and inspected the landing point (the Guangya movie
   // incident). One fresh turn gets the live sandbox state and a chance to perform
@@ -506,6 +510,7 @@ export async function runAcquisitionAgent(
         remainingSteps,
       );
       result = recoveryResult;
+      recoveryAttempted = true;
       steps += Math.max(
         recoveryResult.steps?.length ?? 0,
         recoveryResult.finishReason === "content-filter" ? 1 : 0,
@@ -519,6 +524,69 @@ export async function runAcquisitionAgent(
         peakInputTokens = Math.max(peakInputTokens ?? 0, recoveryPeak);
       }
     }
+  }
+  let coverage = await request.sandbox.finish();
+  const remainingSteps = maxSteps - steps;
+  // A run can end with the right resource already 秒传-landed but never moved:
+  // a premature finish, the step cap, or the model simply stopping after transfer.
+  // The harness then wipes staging and the run reports no-coverage over a good
+  // resource (罗小黑 E42, 2026-11-07). One focused organize-only turn gets the live
+  // truth — the needed files are still in staging — and a chance to move/mark, or
+  // deliberately delete them, before the terminal decision. Search and transfer are
+  // deliberately absent: the sandbox is the evidence and a retry must not duplicate
+  // side effects. A replace run has its own reportReplacement contract; a run that
+  // honestly reported no coverage is not overridden.
+  if (
+    remainingSteps > 0 &&
+    !recoveryAttempted &&
+    !request.stagingRecovery &&
+    !coverage.coverageMet &&
+    request.sandbox.hasReplace?.() !== true &&
+    request.sandbox.noCoverageWasReported?.() !== true &&
+    (await request.sandbox.hasLandedFiles?.()) === true
+  ) {
+    const recoveryToolNames = new Set([
+      "readSkill",
+      "inspectStaging",
+      "inspectTargetDir",
+      "moveToSeason",
+      "deleteFiles",
+      "flattenMovie",
+      "renameSubtitle",
+      "markObtained",
+      "finish",
+      "reportNoCoverage",
+    ]);
+    if (!request.movie) recoveryToolNames.add("discardStaging");
+    const recoveryTools = Object.fromEntries(
+      Object.entries(tools).filter(([name]) => recoveryToolNames.has(name)),
+    ) as ToolSet;
+    const missing = coverage.missing.join(",");
+    const recoveryResult = await generateAgentTurn(
+      `${request.system}\n\n【收尾】主循环已结束，但本轮转存的文件仍留在 staging，覆盖还没达成（缺 ${missing}）。请先 inspectStaging 与 inspectTargetDir 读取真实状态：缺集文件若已在 staging，用 moveToSeason 按季放好（字幕随视频一起），再 markObtained，最后 finish；若确认这些文件不属于目标作品，删除它们或 discardStaging 后再 finish/reportNoCoverage。不要再搜索、不要重新转存。`,
+      `${request.prompt}\n\nThe loop ended but the transfer already landed files and coverage is still unmet (missing: ${missing}). The needed episode file(s) may be sitting in staging, moved but unmarked, or misfiled into the wrong season. Continue from the CURRENT sandbox state: inspectStaging and inspectTargetDir first, then move what belongs (subtitles with their video), markObtained, and finish. If the landed files are genuinely the wrong work, delete them or discard staging and finish/reportNoCoverage. Do not search or transfer again.`,
+      recoveryTools,
+      Math.min(POST_LOOP_RECOVERY_STEPS, remainingSteps),
+    );
+    result = recoveryResult;
+    steps += Math.max(
+      recoveryResult.steps?.length ?? 0,
+      recoveryResult.finishReason === "content-filter" ? 1 : 0,
+    );
+    const recoveryTokens = recoveryResult.totalUsage?.totalTokens;
+    if (typeof recoveryTokens === "number") {
+      totalUsageTokens = (totalUsageTokens ?? 0) + recoveryTokens;
+    }
+    const recoveryPeak = peakInputTokensOf(recoveryResult);
+    if (typeof recoveryPeak === "number") {
+      peakInputTokens = Math.max(peakInputTokens ?? 0, recoveryPeak);
+    }
+    coverage = await request.sandbox.finish();
+  }
+  // Still uncovered with a needed episode video only in staging: tell the harness
+  // to keep staging instead of wiping the only copy (the next patrol adopts it).
+  if (!coverage.coverageMet) {
+    await request.sandbox.rememberNeededStagingFiles?.();
   }
   if (process.env.MEDIA_TRACK_AGENT_LOG === "1") {
     const total = totalUsageTokens;
@@ -535,7 +603,7 @@ export async function runAcquisitionAgent(
   return {
     text: result.text,
     steps,
-    coverage: await request.sandbox.finish(),
+    coverage,
   };
 }
 

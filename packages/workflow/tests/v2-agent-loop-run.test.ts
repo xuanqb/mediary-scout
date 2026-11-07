@@ -676,4 +676,82 @@ describe("runAcquisitionAgent — the real AI SDK tool-loop over the sandbox", (
     expect(result.steps).toBe(2);
     expect(result.text).toMatch(/stopping/);
   });
+
+  it("recovers a run that stopped after the transfer without moving the needed episode (罗小黑 E42)", async () => {
+    const storage = new Storage115Simulator({
+      packs: {
+        pack: {
+          files: [
+            { path: "Show.S01E01.mkv", sizeBytes: 100 },
+            { path: "Show.S01E02.mkv", sizeBytes: 100 },
+          ],
+        },
+      },
+    });
+    const stagingDirectoryId = await storage.createDirectory({ name: "staging", parentId: "root" });
+    const seasonDirectoryId = await storage.createDirectory({ name: "Season 1", parentId: "root" });
+    await storage.transferCandidate({ candidateId: "pack", intoDirectoryId: stagingDirectoryId });
+    const ep01 = (await storage.listTree({ directoryId: stagingDirectoryId })).find((f) => f.path.includes("E01"))!;
+    const sandbox = new TaskSandbox({
+      provider: new FakeResourceProviderV2({ results: {} }),
+      storage,
+      stagingDirectoryId,
+      targetSeasonDirectoryIds: { 1: seasonDirectoryId },
+      need: ["S01E01"],
+    });
+
+    let calls = 0;
+    let recoveryTools: string[] = [];
+    const model = new MockLanguageModelV3({
+      doGenerate: async (options) => {
+        calls += 1;
+        // The main loop: the model only DESCRIBES the move it intends and stops.
+        // Nothing has been moved when the loop ends — the exact live failure.
+        if (calls === 1) {
+          return {
+            content: [{ type: "text" as const, text: "S01E01 is in staging; I will move only E01 and mark it." }],
+            finishReason: { unified: "stop" as const, raw: "stop" as const },
+            usage: USAGE,
+            warnings: [],
+          };
+        }
+        if (calls === 2) {
+          recoveryTools = (options.tools ?? []).map((t) => (t as { name: string }).name);
+        }
+        const steps = [
+          { tool: "inspectStaging", input: {} },
+          { tool: "moveToSeason", input: { moves: [{ season: 1, fileIds: [ep01.id] }] } },
+          { tool: "markObtained", input: { codes: ["S01E01"] } },
+          { tool: "finish", input: {} },
+        ] as const;
+        const step = steps[calls - 2];
+        if (step) {
+          return {
+            content: [{ type: "tool-call" as const, toolCallId: `post-loop-${calls}`, toolName: step.tool, input: JSON.stringify(step.input) }],
+            finishReason: { unified: "tool-calls" as const, raw: "tool-calls" as const },
+            usage: USAGE,
+            warnings: [],
+          };
+        }
+        return { content: [{ type: "text" as const, text: "done" }], finishReason: { unified: "stop" as const, raw: "stop" as const }, usage: USAGE, warnings: [] };
+      },
+    });
+
+    const result = await runAcquisitionAgent({
+      sandbox,
+      model,
+      system: "You acquire media into the scoped sandbox.",
+      prompt: "Ensure S01E01 is obtained.",
+      maxSteps: 10,
+    });
+
+    expect(calls).toBe(5); // main loop + organize-only recovery turn
+    expect(result.coverage.coverageMet).toBe(true);
+    expect(result.coverage.obtained).toEqual(["S01E01"]);
+    expect((await storage.listTree({ directoryId: seasonDirectoryId })).map((f) => f.path)).toEqual(["Show.S01E01.mkv"]);
+    // The recovery can only organize — it must never search or transfer again.
+    expect(recoveryTools).toContain("moveToSeason");
+    expect(recoveryTools).not.toContain("searchResources");
+    expect(recoveryTools).not.toContain("transferCandidate");
+  });
 });

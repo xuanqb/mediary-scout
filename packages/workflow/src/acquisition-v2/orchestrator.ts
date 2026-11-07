@@ -419,7 +419,9 @@ export async function runAcquisitionV2(request: RunAcquisitionV2Request): Promis
     ...(request.searchProfile === undefined ? {} : { searchProfile: request.searchProfile }),
     ...(memoryBinding ? { memory: memoryBinding } : {}),
     ...(protectExisting ? { protectExistingFiles: true } : {}),
-    ...(request.stagingRecovery ? { stagingListDepth: JANITOR_LIST_DEPTH } : {}),
+    ...(request.stagingRecovery
+      ? { stagingListDepth: JANITOR_LIST_DEPTH, stagingRecovery: true }
+      : {}),
     ...(rejectedSource
       ? {
           isRejected: async (candidate: { id: string; title: string }) => {
@@ -702,6 +704,10 @@ export async function runAcquisitionV2(request: RunAcquisitionV2Request): Promis
       const leaks: StagingLeak[] = [];
       const unverified: StagingCleanupUnverified[] = [];
       const kept: StagingKeptUnmoved[] = [];
+      // A needed episode video never moved out of staging: keep the dir so the
+      // cleanup cannot delete the only copy (the agent loop remembers the same ids
+      // on a normal return; this covers a throw before that).
+      await sandbox.rememberNeededStagingFiles();
       await storage.cleanupMaterializedStagings({
         unmovedFileIds: new Set(sandbox.unmovedStagingFileIds()),
         onLeak: (leak) => {

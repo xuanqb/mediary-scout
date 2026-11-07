@@ -25,6 +25,7 @@ import {
 } from "../agent-memory.js";
 import { indexSubtitleFiles, selectSubtitleChunk } from "./subtitle-renewal.js";
 import { candidateDriveLabel } from "./resource-link.js";
+import { episodeCodeFromFileName } from "../episode-code.js";
 
 /** Quality / subtitle / source tokens that PanSou share titles almost never carry,
  *  so appending them collapses recall (实测归零). Case-insensitive; word-ish so
@@ -363,6 +364,11 @@ export interface TaskSandboxOptions {
   /** Listings of the staging directory use this maxDepth. A recovery sets
    *  JANITOR_LIST_DEPTH. Absent: the storage default (ordinary runs). */
   stagingListDepth?: number;
+  /** A janitor run adopting an existing leftover: the leftover may hold copies the
+   *  library already has, and the harness preserves the whole dir unless the agent
+   *  explicitly discards it — so the "needed files must leave staging" guards do
+   *  not apply to a recovery's deliberate discard. */
+  stagingRecovery?: boolean;
 }
 
 /** What the models see of a memory entry (no persistence identifiers). */
@@ -473,6 +479,8 @@ export class TaskSandbox {
   private readonly isRejected: TaskSandboxOptions["isRejected"];
   private readonly protectExistingFiles: boolean;
   private readonly stagingListDepth: number | undefined;
+  /** A janitor run adopting a leftover; see TaskSandboxOptions.stagingRecovery. */
+  private readonly stagingRecovery: boolean;
   /** Set once captureProtectedFiles has listed the target dirs (see assertRejectedFirst). */
   private protectedCaptured = false;
   /** Replace runs: every file in a target dir when the run started (the user's
@@ -519,6 +527,9 @@ export class TaskSandbox {
   /** Set only when discardStaging returns. A recovery finish is not permission
    *  to delete the leftover; the harness coverage read of finish() is not either. */
   private leftoverDiscarded = false;
+  /** Set by a successful reportNoCoverage. A post-loop recovery turn must not
+   *  override an honest no-coverage report — only a premature/step-capped finish. */
+  private noCoverageReported = false;
 
   constructor(options: TaskSandboxOptions) {
     this.provider = options.provider;
@@ -545,6 +556,7 @@ export class TaskSandbox {
     this.linkOf = options.linkOf;
     this.protectExistingFiles = options.protectExistingFiles === true;
     this.stagingListDepth = options.stagingListDepth;
+    this.stagingRecovery = options.stagingRecovery === true;
   }
 
   /** A listing. The staging directory of a recovery is walked to the depth the
@@ -1397,6 +1409,18 @@ export class TaskSandbox {
         `SANDBOX_STAGING_HOLDS_UNMOVED: ${ids.length} file(s) whose move failed are still in staging (${ids.join(", ")}) — move them into their season with moveToSeason, or deleteFiles them on purpose, before discarding staging`,
       );
     }
+    // Wiping staging also wipes every needed episode that never made it into its
+    // season — the 罗小黑 E42 incident: two videos landed, nothing was moved, and
+    // the cleanup took the only copies with it. A janitor recovery is exempt: it
+    // deliberately abandons a leftover, and the harness keeps the adopted dir unless
+    // the agent explicitly discards it.
+    const stagedNeeded = this.stagingRecovery ? [] : await this.stagedNeededEpisodeFiles();
+    if (stagedNeeded.length > 0) {
+      const codes = [...new Set(stagedNeeded.map((file) => file.code))].join(",");
+      throw new Error(
+        `SANDBOX_DISCARD_NEEDED_FILES: ${codes} — needed episode file(s) are still only in staging. moveToSeason them into their season (subtitles ride along) and markObtained before discarding staging`,
+      );
+    }
     const removed = await this.storage.removeDirectory({ directoryId: this.stagingDirectoryId });
     this.leftoverDiscarded = true;
     return removed;
@@ -1472,6 +1496,18 @@ export class TaskSandbox {
       if (unreported.length > 0) {
         throw new Error(
           `SANDBOX_REPORT_REQUIRED: ${unreported.join(",")} — call reportReplacement for these (replaced with the candidateId that landed and the episode's new fileIds, or not_found with a note), then finish`,
+        );
+      }
+    } else if (!this.stagingRecovery) {
+      // A transferred needed episode must be moved (or deliberately deleted)
+      // before finishing: ending the run here lets the harness discard staging,
+      // losing the only copy and reporting no-coverage despite a good resource.
+      const staged = await this.stagedNeededEpisodeFiles();
+      if (staged.length > 0) {
+        const codes = [...new Set(staged.map((file) => file.code))].join(",");
+        const ids = staged.map((file) => file.id).join(", ");
+        throw new Error(
+          `SANDBOX_NEEDED_FILES_IN_STAGING: ${codes} — needed episode file(s) are still only in staging (${ids}). Call moveToSeason with their fileIds (subtitles ride along), then markObtained, before finish. If you intentionally reject this file, deleteFiles it first.`,
         );
       }
     }
@@ -1575,7 +1611,40 @@ export class TaskSandbox {
       message: `agent 上报无覆盖：${reason}（已搜索 ${evidenceKeywords.size} 个词，含系统预搜）`,
       data: { reason, searchesPerformed: evidenceKeywords.size },
     });
+    this.noCoverageReported = true;
     return { reason, searchesPerformed: evidenceKeywords.size };
+  }
+
+  /** Whether the agent explicitly reported no coverage (honest terminal). */
+  noCoverageWasReported(): boolean {
+    return this.noCoverageReported;
+  }
+
+  /** Needed episode files still sitting in staging: the agent transferred them but
+   *  never moved them into their season. Finishing here would let the harness
+   *  discard the only copy — the 罗小黑 E42 incident (2026-11-07): two videos landed,
+   *  the agent described moving E42, but finish fired before moveToSeason and both
+   *  files were cleaned up with staging. */
+  private async stagedNeededEpisodeFiles(): Promise<Array<{ id: string; code: string }>> {
+    if (!this.storage || !this.stagingDirectoryId) return [];
+    // A movie's staging IS its target (flattenMovie handles it in place).
+    if (this.allTargetDirIds().includes(this.stagingDirectoryId)) return [];
+    const need = new Set(this.need);
+    if (need.size === 0) return [];
+    let tree: SimTreeFile[];
+    try {
+      tree = await this.listTreeOf(this.stagingDirectoryId);
+    } catch {
+      return []; // unreadable staging: hasTransferEvidence already forces a recovery look
+    }
+    const staged: Array<{ id: string; code: string }> = [];
+    for (const file of tree) {
+      if (!file.isVideo) continue;
+      const code = episodeCodeFromFileName(file.path.split("/").pop() ?? file.path);
+      if (code === null || !need.has(code) || this.countsAsObtained(code)) continue;
+      staged.push({ id: file.id, code });
+    }
+    return staged;
   }
 
   /** Whether there is anything a finish-only recovery could act on: a transfer was
@@ -1597,6 +1666,36 @@ export class TaskSandbox {
       // Unreadable staging: do not claim "nothing happened" on missing evidence —
       // let the recovery turn look for itself (its inspect tools report the error).
       return true;
+    }
+  }
+
+  /** Whether the run actually landed files a finish/organize recovery could still
+   *  complete: materialized videos still in staging or already moved into a target
+   *  dir (plus any pre-existing staging files this run did not materialize). Unlike
+   *  hasTransferEvidence, a transfer that FAILED and landed nothing does not count —
+   *  there is nothing to finish, and every retry would hit the same systemic block. */
+  async hasLandedFiles(): Promise<boolean> {
+    for (const place of this.filePlace.values()) {
+      if (place === "kept" || place === "staging") return true;
+    }
+    if (!this.storage || !this.stagingDirectoryId) return false;
+    try {
+      const staged = await this.listTreeOf(this.stagingDirectoryId);
+      return staged.some((file) => !(this.replace && this.protectedFiles.has(file.id)));
+    } catch {
+      return true;
+    }
+  }
+
+  /** Before the harness cleans up: a needed episode video still in staging was never
+   *  moved, so remember its id as unmoved. The cleanup then KEEPS the staging dir
+   *  instead of deleting the only copy, and the next patrol can adopt it — the last
+   *  line of defence when the loop ends (step cap / a model that just stops) before
+   *  the recovery turn could organize a good resource. */
+  async rememberNeededStagingFiles(): Promise<void> {
+    if (this.stagingRecovery) return;
+    for (const file of await this.stagedNeededEpisodeFiles()) {
+      this.unmovedFileIds.add(file.id);
     }
   }
 
