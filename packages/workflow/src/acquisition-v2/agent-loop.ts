@@ -420,7 +420,9 @@ export async function runAcquisitionAgent(
   });
   const maxSteps = request.maxSteps ?? DEFAULT_MAX_STEPS;
   /** A focused organize/mark/finish pass after the main loop, granted only when a
-   *  transfer landed but coverage is still unmet (premature finish / step cap). */
+   *  transfer landed but coverage is still unmet (premature finish / a model that
+   *  just stops). It may use only the remaining step budget; a step-capped run is
+   *  covered by rememberNeededStagingFiles keeping the staging dir instead. */
   const POST_LOOP_RECOVERY_STEPS = 8;
   const generateAgentTurn = (system: string, prompt: string, toolSet: ToolSet, stepLimit: number) =>
     generateText({
