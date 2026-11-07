@@ -620,7 +620,7 @@ describe("TmdbMetadataProvider", () => {
     expect(atMidnight.season.latestAiredEpisode).toBe(1);
   });
 
-  it("keeps TMDB's season-local last_episode_to_air as the main path", async () => {
+  it("counts a scheduled episode whose air date has arrived even when last_episode_to_air lags", async () => {
     const provider = new TmdbMetadataProvider({
       readToken: "token",
       fetchJson: async (url) => {
@@ -653,18 +653,78 @@ describe("TmdbMetadataProvider", () => {
         throw new Error(`Unexpected URL ${url}`);
       },
     });
+    const prepare = (now: string) =>
+      prepareTrackingTarget({
+        tmdbId: 100,
+        mediaType: "tv",
+        seasonNumber: 1,
+        qualityPreference: "4K",
+        metadataProvider: provider,
+        now: new Date(now),
+      });
 
-    const target = await prepareTrackingTarget({
-      tmdbId: 100,
-      mediaType: "tv",
-      seasonNumber: 1,
-      qualityPreference: "4K",
-      metadataProvider: provider,
-      now: new Date("2026-02-01T00:00:00Z"),
+    // Nothing past E3 has reached its date yet: TMDB's confirmed value stands.
+    const beforeE4 = await prepare("2026-01-20T00:00:00Z");
+    expect(beforeE4.season.latestAiredEpisode).toBe(3);
+    expect(beforeE4.season.totalEpisodes).toBe(5);
+
+    // E4 and E5 have aired by the calendar even though TMDB still says E3.
+    const afterE5 = await prepare("2026-02-01T00:00:00Z");
+    expect(afterE5.season.latestAiredEpisode).toBe(5);
+  });
+
+  it("lifts a lagging last_episode_to_air once the episode's UTC date arrives (凡人修仙传 E199)", async () => {
+    const provider = new TmdbMetadataProvider({
+      readToken: "token",
+      fetchJson: async (url) => {
+        if (url.includes("/tv/106449?")) {
+          return {
+            id: 106449,
+            name: "凡人修仙传",
+            original_name: "凡人修仙传",
+            first_air_date: "2020-07-25",
+            number_of_episodes: 210,
+            overview: "",
+            poster_path: null,
+            backdrop_path: null,
+            // TMDB still points at last week's episode on the air day.
+            last_episode_to_air: { season_number: 1, episode_number: 198, air_date: "2026-10-31" },
+            next_episode_to_air: { season_number: 1, episode_number: 199, air_date: "2026-11-07" },
+            seasons: [{ season_number: 1, episode_count: 210 }],
+          };
+        }
+        if (url.includes("/tv/106449/season/1?")) {
+          return {
+            season_number: 1,
+            episodes: [
+              { episode_number: 197, air_date: "2026-10-24" },
+              { episode_number: 198, air_date: "2026-10-31" },
+              { episode_number: 199, air_date: "2026-11-07" },
+              { episode_number: 200, air_date: "2026-11-14" },
+            ],
+          };
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      },
     });
+    const prepare = (now: string) =>
+      prepareTrackingTarget({
+        tmdbId: 106449,
+        mediaType: "tv",
+        seasonNumber: 1,
+        qualityPreference: "4K",
+        metadataProvider: provider,
+        now: new Date(now),
+      });
 
-    expect(target.season.latestAiredEpisode).toBe(3);
-    expect(target.season.totalEpisodes).toBe(5);
+    // 06:00 China time on the air day is still the previous UTC date: keep E198.
+    const saturdayMorning = await prepare("2026-11-06T22:00:00Z");
+    expect(saturdayMorning.season.latestAiredEpisode).toBe(198);
+
+    // 21:00 China time: 11-07 has arrived in UTC, so E199 counts despite TMDB.
+    const afterUtcMidnight = await prepare("2026-11-07T13:00:00Z");
+    expect(afterUtcMidnight.season.latestAiredEpisode).toBe(199);
+    expect(afterUtcMidnight.season.totalEpisodes).toBe(210);
   });
 });
 

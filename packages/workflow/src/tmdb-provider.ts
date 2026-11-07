@@ -1007,16 +1007,12 @@ function latestAiredEpisodeForSeason(
   seasonNumber: number,
   now: Date,
 ): number {
-  const lastEpisode = details.last_episode_to_air;
-  if (lastEpisode?.season_number === seasonNumber && lastEpisode.episode_number !== undefined) {
-    return lastEpisode.episode_number;
-  }
   const utcToday = now.toISOString().slice(0, 10);
-  // The patrol normally runs at 06:00 China time (22:00 UTC the previous day),
-  // so a UTC date keeps an episode dated today in Asia from being counted too early.
   // Having an air_date is not having aired: TMDB publishes schedules in advance,
-  // and last_episode_to_air lags at a season premiere and for brand-new shows.
-  return Math.max(
+  // so only dates that have actually arrived (UTC) count. The patrol normally runs
+  // at 06:00 China time (22:00 UTC the previous day), so an episode dated today in
+  // Asia is not counted until its day starts in UTC.
+  const scheduledAired = Math.max(
     0,
     ...(seasonDetails.episodes ?? [])
       .filter(
@@ -1027,6 +1023,17 @@ function latestAiredEpisodeForSeason(
       )
       .map((episode) => episode.episode_number ?? 0),
   );
+  const lastEpisode = details.last_episode_to_air;
+  // last_episode_to_air is TMDB-confirmed and can run AHEAD of the schedule (a
+  // late-night airing, a corrected date), so never lower it. It also LAGS on the
+  // air day — 凡人修仙传 E199: the season date was today while the field still
+  // pointed at last week's E198 — and the schedule then lifts it once the UTC date
+  // arrives. A field from ANOTHER season proves nothing about this one (it lags at
+  // a season premiere), so only the schedule applies there.
+  if (lastEpisode?.season_number === seasonNumber && lastEpisode.episode_number !== undefined) {
+    return Math.max(lastEpisode.episode_number, scheduledAired);
+  }
+  return scheduledAired;
 }
 
 function normalizeTitle(value: string): string {
