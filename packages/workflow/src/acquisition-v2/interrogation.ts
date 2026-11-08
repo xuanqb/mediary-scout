@@ -33,7 +33,7 @@ export const INTERROGATION_QUESTIONS: readonly InterrogationQuestion[] = [
     prompt:
       "你现在的任务:用户要获取《绝命毒师》全 5 季,缺集横跨多个季,PanSou 只有一个『全五季』嵌套全集包。请只用【中文文字】描述你的完整打算——从零开始按 1. 2. 3. 列出你会【依次调用哪个工具、为什么】,直到入库,不要省略任何步骤。⚠️ 这是问询不是执行:绝对不要真的调用工具、不要输出任何 tool_call 或函数调用语法,就用文字把你的计划讲清楚。",
     expectation:
-      "主动先 readSkill(tv + protocol);再 search→认出全集包只转一次→inspectStaging 看嵌套→先把整盘分发计划想好(Evidence→Facts→Decision:每个缺集→对应文件+字幕→哪个季)→一次 moveToSeason({moves:[每季一条]}) 只搬缺集、字幕同季、已有季不复制→inspectTargetDir 验收→markObtained→discardStaging→finish。重点看:是否真读 skill、是否先规划再一次性批量分发。",
+      "主动先 readSkill(tv + protocol);再 search→认出全集包只转一次→inspectStaging 看嵌套→先把整盘分发计划想好(Evidence→Facts→Decision:每个缺集→对应文件+字幕→哪个季)→一次 moveToSeason({moves:[每季一条，视频放 files 并带 episodeCodes，字幕放同季 fileIds]}) 只搬缺集、已有季不复制→inspectTargetDir 验收→markObtained→discardStaging→finish。重点看:是否真读 skill、是否先规划再一次性批量分发。",
   },
   {
     id: "first_step",
@@ -82,7 +82,7 @@ export const INTERROGATION_QUESTIONS: readonly InterrogationQuestion[] = [
     prompt:
       "换个剧:你要获取《绝命毒师》全部 5 季,缺集横跨多个季。PanSou 返回一个『绝命毒师 全五季』完整包(里面是 Season 1 / Season 2 / ... 的嵌套目录)。你怎么转?转存后怎么把文件放进各自的季目录?",
     expectation:
-      "只转这一个全集包(一次);转存后看真实 staging 的嵌套结构,提交一个分发计划 moveToSeason({moves:[{season,fileIds}]})、每季一条 move 把文件分发进它自己的 Season 目录(每个视频的字幕跟它同季同在 fileIds 里),而不是全堆在一个目录。",
+      "只转这一个全集包(一次);转存后看真实 staging 的嵌套结构,提交一个分发计划 moveToSeason({moves:[{season, files:[{fileId,episodeCodes}], fileIds:[subtitleIds]}]})、每季一条 move 把文件分发进它自己的 Season 目录(视频带集号，字幕跟它同季在 fileIds 里),而不是全堆在一个目录。",
   },
   {
     id: "partial_seasons_full_pack",

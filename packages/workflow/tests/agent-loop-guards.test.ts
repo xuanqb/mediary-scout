@@ -218,7 +218,7 @@ describe("prepareStepSystemOverride (composes step-cap + budget nudges)", () => 
   });
   it("a recovery near the cap or over budget gets only the recovery reminder", () => {
     const reminder =
-      "【进度提醒】这次整理快到上限了。请:① 已确认是季目录缺的视频,moveToSeason 入季并 markObtained;② 还没判断清楚的文件不要删,也不要 discardStaging——留着,下次会再整理;③ finish。";
+      "【进度提醒】这次整理快到上限了。请:① 已确认是季目录缺的视频,moveToSeason 入季(视频放 files 并带 episodeCodes)并 markObtained;② 还没判断清楚的文件不要删,也不要 discardStaging——留着,下次会再整理;③ finish。";
     const nearCap = prepareStepSystemOverride({
       stepNumber: 55,
       maxSteps: 60,

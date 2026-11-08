@@ -87,7 +87,8 @@ export interface StorageV2 {
    *  the source of the wrapper-dir handle flatten removes. */
   listSubdirectories(input: { directoryId: string; maxDepth?: number }): Promise<Array<{ id: string; path: string }>>;
   moveFiles(input: { fileIds: string[]; targetDirectoryId: string }): Promise<{ moved: string[] }>;
-  /** Rename a single file in place (same directory) — the subtitle-rename exception. */
+  /** Rename a single file in place (same directory) — subtitles, and the system's
+   *  canonical episode-name step. */
   renameFile(input: { directoryId: string; fileId: string; newName: string }): Promise<void>;
   /** Delete files scoped to a directory — real 115 deletion is directory-scoped,
    *  so the caller names the dir the files live in. */

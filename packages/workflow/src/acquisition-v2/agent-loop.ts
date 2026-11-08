@@ -205,12 +205,30 @@ export function buildSandboxToolSet(
       }),
     moveToSeason: {
       description:
-        "Submit your WHOLE distribution plan in ONE call: `{moves:[{season,fileIds},...]}` — which files go into which season's directory. Each video's SUBTITLES go in the SAME season's fileIds (never leave subtitles behind — they must land beside their video). Move ONLY still-missing episodes; never recopy a season the library already has. A movie move OMITS `season` (the file lands in the movie directory). Returns every touched season dir + the remaining staging so you verify the whole distribution at once and fix any misplacement with another call. Every fileId must currently be in staging.",
+        "Submit your WHOLE distribution plan in ONE call: `{moves:[{season, files?, fileIds?},...]}`. For TV/anime/variety every VIDEO goes in `files` with its episodeCodes (e.g. {fileId:\"v1\",episodeCodes:[\"S01E199\"]}); a file covering several contiguous episodes lists every code. Subtitles ride in the SAME move's `fileIds` — never leave them behind, they must land beside their video. The system renames a video whose name does not already carry its episode code to the library format before moving it (it derives the optional quality/release tags from the candidate evidence). Move ONLY still-missing episodes; never recopy a season the library already has. A movie move OMITS `season` (and episodeCodes; the file lands in the movie directory). Returns every touched season dir + the remaining staging so you verify the whole distribution at once and fix any misplacement with another call. Every fileId must currently be in staging.",
       inputSchema: z.object({
-        moves: z.array(z.object({ season: z.number().int().positive().optional(), fileIds: z.array(z.string()) })),
+        moves: z.array(
+          z.object({
+            season: z.number().int().positive().optional(),
+            fileIds: z.array(z.string()).optional(),
+            files: z
+              .array(
+                z.object({
+                  fileId: z.string(),
+                  episodeCodes: z.array(z.string()).min(1).optional(),
+                }),
+              )
+              .optional(),
+          }),
+        ),
       }),
-      execute: (args: { moves: Array<{ season?: number; fileIds: string[] }> }) =>
-        asEvidence(() => sandbox.moveToSeason(args)),
+      execute: (args: {
+        moves: Array<{
+          season?: number;
+          fileIds?: string[];
+          files?: Array<{ fileId: string; episodeCodes?: string[] }>;
+        }>;
+      }) => asEvidence(() => sandbox.moveToSeason(args)),
     },
     deleteFiles: {
       description:
@@ -324,7 +342,7 @@ export function buildSandboxToolSet(
     };
     tools["transferSubtitle"] = {
       description:
-        "Land a chosen assrt subtitle package's files into staging. Pass the candidateId from viewSubtitleSnapshot. The system resolves the package's filelist (per-episode .ass/.srt with SxxExx filenames) and lands them ALL in ONE batch via the drive's offline-task path (one call regardless of package size — do not split a package into multiple transferSubtitle calls). Returns the filenames that landed. Then RENAME each landed subtitle to match its video (same prefix, different extension) — subtitles are the ONLY files you may rename (a documented exception to the keep-original-name rule) so the scraper auto-loads them. Subtitle miss/empty filelist is a SOFT fail — it does NOT block video coverage; just proceed without subtitles.",
+        "Land a chosen assrt subtitle package's files into staging. Pass the candidateId from viewSubtitleSnapshot. The system resolves the package's filelist (per-episode .ass/.srt with SxxExx filenames) and lands them ALL in ONE batch via the drive's offline-task path (one call regardless of package size — do not split a package into multiple transferSubtitle calls). Returns the filenames that landed. Then RENAME each landed subtitle to match its video (same prefix, different extension) — subtitles are the ONLY files YOU may rename (the system may separately canonicalize a video's own name at move time) so the scraper auto-loads them. Subtitle miss/empty filelist is a SOFT fail — it does NOT block video coverage; just proceed without subtitles.",
       inputSchema: z.object({ candidateId: z.number().int().positive() }),
       execute: (args: { candidateId: number }) =>
         asEvidence(() => sandbox.transferSubtitle({ candidateId: args.candidateId })),
@@ -336,7 +354,7 @@ export function buildSandboxToolSet(
   if (recover || options.subtitle) {
     tools["renameSubtitle"] = {
       description:
-        "Rename landed subtitle files to match their videos, in ONE BATCH: decide EVERY subtitle↔episode pairing first (fileIds from inspectStaging), then submit them all as renames:[{fileId,newName},…] — same filename prefix as each episode's video, keep the subtitle extension (video Show.S02E01.mkv → subtitle Show.S02E01.ass; 简/繁 variants keep their .sc/.tc infix). NEVER rename one file per call — at 77 episodes that collapses; the batch is one call regardless of count. Subtitles are the ONLY files you may rename (the documented exception) so the scraper auto-loads them. Per-item guard violations come back in `errors` without aborting the rest. Then move each subtitle into its season with its video via moveToSeason.",
+        "Rename landed subtitle files to match their videos, in ONE BATCH: decide EVERY subtitle↔episode pairing first (fileIds from inspectStaging), then submit them all as renames:[{fileId,newName},…] — same filename prefix as each episode's video, keep the subtitle extension (video Show.S02E01.mkv → subtitle Show.S02E01.ass; 简/繁 variants keep their .sc/.tc infix). NEVER rename one file per call — at 77 episodes that collapses; the batch is one call regardless of count. Subtitles are the ONLY files YOU may rename (the system canonicalizes a video's own name at move time) so the scraper auto-loads them. Per-item guard violations come back in `errors` without aborting the rest. Then move each subtitle into its season with its video via moveToSeason.",
       inputSchema: z.object({
         renames: z.array(z.object({ fileId: z.string(), newName: z.string() })).min(1),
       }),

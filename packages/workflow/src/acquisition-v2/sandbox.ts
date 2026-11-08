@@ -26,6 +26,17 @@ import {
 import { indexSubtitleFiles, selectSubtitleChunk } from "./subtitle-renewal.js";
 import { candidateDriveLabel } from "./resource-link.js";
 import { episodeCodeFromFileName } from "../episode-code.js";
+import {
+  alignSubtitleName,
+  episodeNumber,
+  episodeRangeKey,
+  extractReleaseGroup,
+  extractVideoFormat,
+  fileExtension,
+  isParseableEpisodeName,
+  renderLibraryFilename,
+  withCollisionSuffix,
+} from "../library-filename.js";
 
 /** Quality / subtitle / source tokens that PanSou share titles almost never carry,
  *  so appending them collapses recall (实测归零). Case-insensitive; word-ish so
@@ -38,6 +49,18 @@ const SUBTITLE_NAME_PATTERN = /\.(srt|ass|ssa|sub|idx|vtt|sup|smi)$/i;
 
 export const SUBTITLE_RENEWAL_CHUNK_SIZE = 24;
 const SUBTITLE_MAX_CONSECUTIVE_FAILURES = 3;
+
+/** A path relative to the listed directory — its own file name. */
+function pathBaseName(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? path : path.slice(slash + 1);
+}
+
+/** Replace a relative path's final file name, keeping its wrapper dirs. */
+function replacePathBaseName(path: string, name: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? name : `${path.slice(0, slash + 1)}${name}`;
+}
 
 export interface SubtitleChunkDiagnostic {
   chunkNumber: number;
@@ -281,6 +304,10 @@ export interface TaskSandboxOptions {
    *  keywords are NOT checked against them: the agent may search any name,
    *  繁体/英文 included. */
   titleTerms?: string[];
+  /** TV/anime/variety only: render a Library Filename for a landed video whose
+   *  name does not already carry its episode code. Absent = no canonical rename
+   *  (movies, and tests that do not exercise the naming contract). */
+  libraryNaming?: { title: string };
   /** Movie-only "中文字幕软兜底": when true, the search budget becomes 8+2 (a
    *  RESERVE the agent is told about), and on budget exhaustion the agent is
    *  authorized to land a raw-name match of the CORRECT film as last-resort
@@ -437,6 +464,7 @@ export class TaskSandbox {
   private readonly movieDir: string | undefined;
   private readonly need: string[];
   private readonly titleTerms: readonly string[];
+  private readonly libraryNaming: { title: string } | undefined;
   private readonly subtitleFallback: boolean;
   /** Reserve-zone threshold (movie 8+2) — undefined disables the reserve zone. */
   private readonly softThreshold: number | undefined;
@@ -549,6 +577,7 @@ export class TaskSandbox {
     this.movieDir = options.targetMovieDirectoryId;
     this.need = [...(options.need ?? [])];
     this.titleTerms = options.titleTerms ?? [];
+    this.libraryNaming = options.libraryNaming;
     this.subtitleProvider = options.subtitleProvider;
     this.memory = options.memory;
     this.replace = options.replace;
@@ -1212,16 +1241,23 @@ export class TaskSandbox {
 
   /** Batch distribution plan (挖取/extract): the agent submits the WHOLE
    *  "files → season" mapping at once — each video's SUBTITLES ride in the same
-   *  season's fileIds (§1.14). The system runs every move and force-rereads,
-   *  returning EVERY touched season dir + the remaining staging so the agent
-   *  verifies the whole distribution in one shot and fixes any misplacement. Only
-   *  still-missing episodes are moved (already-present seasons are NOT recopied —
-   *  the agent judges this). A movie move OMITS `season` (its target is the movie
-   *  dir, which equals staging). Distributing in one call is more ergonomic than
-   *  per-season calls, and moves are NOT 逆鳞-budget-sensitive like transfers
-   *  (§2/§5). Scope guard: every fileId must currently be in THIS task's staging. */
+   *  season's fileIds (§1.14). TV videos may ALSO name their episode codes in
+   *  `files`; the system then canonicalizes a name that does not already expose
+   *  the code (MoviePilot TV format) before moving. The system runs every move
+   *  and force-rereads, returning EVERY touched season dir + the remaining
+   *  staging so the agent verifies the whole distribution in one shot and fixes
+   *  any misplacement. Only still-missing episodes are moved (already-present
+   *  seasons are NOT recopied — the agent judges this). A movie move OMITS
+   *  `season` (its target is the movie dir, which equals staging).
+   *  Distributing in one call is more ergonomic than per-season calls, and moves
+   *  are NOT 逆鳞-budget-sensitive like transfers (§2/§5). Scope guard: every
+   *  fileId must currently be in THIS task's staging. */
   async moveToSeason(input: {
-    moves: Array<{ season?: number; fileIds: string[] }>;
+    moves: Array<{
+      season?: number;
+      fileIds?: string[];
+      files?: Array<{ fileId: string; episodeCodes?: string[] }>;
+    }>;
   }): Promise<{ seasons: Record<number, SimTreeFile[]>; staging: SimTreeFile[] }> {
     if (!this.storage || !this.stagingDirectoryId) {
       throw new Error("SANDBOX: no storage/staging handle configured");
@@ -1236,7 +1272,28 @@ export class TaskSandbox {
             : `SANDBOX_NO_SEASON_DIR: no scoped directory for season ${move.season} (out of this task's season scope)`,
         );
       }
-      return { season: move.season, targetDir, fileIds: move.fileIds };
+      const files = [
+        ...(move.fileIds ?? []).map((fileId) => ({ fileId })),
+        ...(move.files ?? []).map((file) => ({
+          fileId: file.fileId,
+          ...(file.episodeCodes === undefined ? {} : { episodeCodes: file.episodeCodes }),
+        })),
+      ];
+      if (files.length === 0) {
+        throw new Error("SANDBOX_NO_FILES: every move names at least one fileId");
+      }
+      const seen = new Set<string>();
+      for (const file of files) {
+        if (seen.has(file.fileId)) {
+          throw new Error(`SANDBOX_DUPLICATE_FILE: ${file.fileId} appears more than once in one move`);
+        }
+        seen.add(file.fileId);
+      }
+      return {
+        ...(move.season === undefined ? {} : { season: move.season }),
+        targetDir,
+        files,
+      };
     });
     // Validate ALL fileIds against the current staging snapshot before any move.
     // A budget refusal here never reaches the move loop, so it has to hold the
@@ -1245,53 +1302,62 @@ export class TaskSandbox {
     try {
       stagingTree = await this.listTreeOf(this.stagingDirectoryId);
     } catch (error) {
-      const ids = resolved.flatMap((move) => move.fileIds);
+      const ids = resolved.flatMap((move) => move.files.map((file) => file.fileId));
       for (const fileId of ids) this.unmovedFileIds.add(fileId);
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(
         `MOVE_NOT_DONE: these files did NOT move (${ids.join(", ")}). Do not markObtained their episodes this run — they are still only in staging. ${reason}`,
       );
     }
-    const stagingIds = new Set(stagingTree.map((file) => file.id));
-    const outOfScope = resolved.flatMap((move) => move.fileIds).filter((fileId) => !stagingIds.has(fileId));
+    const stagingById = new Map(stagingTree.map((file) => [file.id, file]));
+    const outOfScope = resolved
+      .flatMap((move) => move.files.map((file) => file.fileId))
+      .filter((fileId) => !stagingById.has(fileId));
     if (outOfScope.length > 0) {
       throw new Error(`SANDBOX_FILES_NOT_IN_STAGING: ${outOfScope.join(",")}`);
     }
     // A movie's staging IS its movie dir, so the old film sits "in staging" too.
-    this.assertNotProtected(resolved.flatMap((move) => move.fileIds));
+    this.assertNotProtected(resolved.flatMap((move) => move.files.map((file) => file.fileId)));
     // Hold every validated id before the first move. A throw on season 1 must not
     // leave season 2's files unmarked — the loop never reaches them.
-    for (const fileId of resolved.flatMap((move) => move.fileIds)) {
+    for (const fileId of resolved.flatMap((move) => move.files.map((file) => file.fileId))) {
       this.unmovedFileIds.add(fileId);
+    }
+    // Canonicalize a landed video whose name does not carry its episode code.
+    // This happens in staging, before the move, so the target directory never
+    // briefly holds a name SmartStrm/Emby cannot parse.
+    for (const move of resolved) {
+      await this.canonicalizeMoveFiles(move, stagingById);
     }
     // Execute each move (the system does the per-file moves under the hood).
     // A failure — a 115 budget refusal in particular — must come back saying the
     // files did not move. The agent otherwise marks the episodes obtained and the
     // only copies sit in staging (2026-09-27, 14 episodes).
     for (const move of resolved) {
+      const fileIds = move.files.map((file) => file.fileId);
       // null = moveFiles threw before any list. A returned list, even a short one,
       // is the ids already in the season; only the rest are still only in staging.
       let landed: readonly string[] | null = null;
       try {
-        const moved = await this.storage.moveFiles({ fileIds: move.fileIds, targetDirectoryId: move.targetDir });
+        const moved = await this.storage.moveFiles({ fileIds, targetDirectoryId: move.targetDir });
         landed = moved.moved;
         // A movie's target IS staging, so those files were already kept at landing.
         // 115 can answer ok:false and return moved: [] — those files are still in staging.
         if (move.targetDir !== this.stagingDirectoryId) this.markKept(moved.moved);
-        if (moved.moved.length !== move.fileIds.length) {
-          throw new Error(`moveFiles moved ${moved.moved.length} of ${move.fileIds.length}`);
+        if (moved.moved.length !== fileIds.length) {
+          throw new Error(`moveFiles moved ${moved.moved.length} of ${fileIds.length}`);
         }
-        for (const fileId of move.fileIds) {
+        for (const fileId of fileIds) {
           this.unmovedFileIds.delete(fileId);
         }
       } catch (error) {
         const landedIds = new Set(landed ?? []);
-        for (const fileId of move.fileIds) {
+        for (const fileId of fileIds) {
           if (landedIds.has(fileId)) this.unmovedFileIds.delete(fileId);
           else this.unmovedFileIds.add(fileId);
         }
         const reason = error instanceof Error ? error.message : String(error);
-        const missed = landed === null ? move.fileIds : move.fileIds.filter((fileId) => !landedIds.has(fileId));
+        const missed = landed === null ? fileIds : fileIds.filter((fileId) => !landedIds.has(fileId));
         throw new Error(
           `MOVE_NOT_DONE: these files did NOT move (${missed.join(", ")}). Do not markObtained their episodes this run — they are still only in staging. ${reason}`,
         );
@@ -1305,6 +1371,226 @@ export class TaskSandbox {
       }
     }
     return { seasons, staging: await this.listTreeOf(this.stagingDirectoryId) };
+  }
+
+  /**
+   * Rename this move's videos that do not already carry their mapped episode
+   * code, before they leave staging. A rename failure is soft (the file still
+   * moves and is marked): record an audit event and keep the original name.
+   * Subtitle files named after a renamed video follow it, preserving language
+   * infixes (`.sc.ass` / `.tc.ass`).
+   */
+  private async canonicalizeMoveFiles(
+    move: {
+      season?: number;
+      targetDir: string;
+      files: Array<{ fileId: string; episodeCodes?: string[] }>;
+    },
+    stagingById: Map<string, SimTreeFile>,
+  ): Promise<void> {
+    const storage = this.storage;
+    const stagingDirectoryId = this.stagingDirectoryId;
+    const naming = this.libraryNaming;
+    // season 0 / specials are out of scope: keep their original names.
+    if (!storage || !stagingDirectoryId || !naming || move.season === undefined || move.season === 0) {
+      return;
+    }
+
+    const renameable: Array<{ file: SimTreeFile; codes: string[] }> = [];
+    for (const entry of move.files) {
+      if (!entry.episodeCodes || entry.episodeCodes.length === 0) {
+        // Safety net: a TV video with no code and an unparseable name cannot be
+        // canonicalized. The prompt requires codes; surface the miss in the run
+        // audit instead of silently landing an Emby-invisible file.
+        const uncoded = stagingById.get(entry.fileId);
+        if (uncoded?.isVideo) {
+          const name = pathBaseName(uncoded.path);
+          if (episodeCodeFromFileName(name) === null) {
+            this.auditEvents.push({
+              type: "episode_rename_skipped",
+              message: `未提供集号，无法规范命名「${name}」`,
+              data: { fileId: uncoded.id, from: name, reason: "no_episode_codes" },
+            });
+          }
+        }
+        continue;
+      }
+      const file = stagingById.get(entry.fileId);
+      if (!file) continue;
+      if (file.isSubtitle) {
+        throw new Error(
+          `SANDBOX_EPISODE_CODES_ON_SUBTITLE: ${entry.fileId} is a subtitle; put it in fileIds and let it follow its video`,
+        );
+      }
+      if (!file.isVideo) {
+        throw new Error(
+          `SANDBOX_EPISODE_CODES_ON_NON_VIDEO: ${entry.fileId} is not a video and cannot carry episodeCodes`,
+        );
+      }
+      this.assertEpisodeTokens(entry.episodeCodes);
+      for (const code of entry.episodeCodes) {
+        const season = Number(/^S(\d{2,})E\d{2,}$/.exec(code)?.[1] ?? NaN);
+        if (season !== move.season) {
+          throw new Error(
+            `SANDBOX_EPISODE_SEASON_MISMATCH: ${code} cannot be moved into season ${move.season}`,
+          );
+        }
+      }
+      renameable.push({ file, codes: entry.episodeCodes });
+    }
+    if (renameable.length === 0) return;
+
+    // Names already in the target season; the batch reserves each new name too,
+    // so two videos mapped to the same episode cannot both take the plain name.
+    let taken: Set<string>;
+    try {
+      const targetTree = await this.listTreeOf(move.targetDir);
+      taken = new Set(targetTree.map((file) => pathBaseName(file.path)));
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      for (const { file, codes } of renameable) {
+        const from = pathBaseName(file.path);
+        this.auditEvents.push({
+          type: "episode_rename_failed",
+          message: `改名失败，已按原名入库：「${from}」（目标目录读取失败）`,
+          data: { fileId: file.id, from, episodeCodes: codes, error: reason },
+        });
+      }
+      return;
+    }
+
+    // Resolve a staging file's containing directory lazily (packs land nested in
+    // their own wrapper; renameFile is directory-scoped).
+    let stagingSubdirectories: Array<{ id: string; path: string }> | null = null;
+    const parentDirectoryId = async (path: string): Promise<string> => {
+      const parentPath = path.split("/").slice(0, -1).join("/");
+      if (!parentPath) return stagingDirectoryId;
+      if (stagingSubdirectories === null) {
+        stagingSubdirectories = await storage.listSubdirectories({ directoryId: stagingDirectoryId });
+      }
+      const hit = stagingSubdirectories.find((dir) => dir.path === parentPath);
+      if (!hit) throw new Error(`SANDBOX_STAGING_DIR_NOT_FOUND: ${parentPath}`);
+      return hit.id;
+    };
+
+    const candidateOf = (fileId: string) => {
+      const candidateId = this.materializedBy.get(fileId);
+      return candidateId === undefined ? undefined : this.findObservedCandidate(candidateId);
+    };
+
+    for (const { file, codes } of renameable) {
+      const originalName = pathBaseName(file.path);
+      if (isParseableEpisodeName(originalName, move.season, codes)) continue;
+
+      const range = episodeRangeKey(codes);
+      if (!range) {
+        this.auditEvents.push({
+          type: "episode_rename_skipped",
+          message: `无法规范命名「${originalName}」：集号不连续`,
+          data: { fileId: file.id, from: originalName, episodeCodes: codes, reason: "non_contiguous" },
+        });
+        continue;
+      }
+
+      const candidate = candidateOf(file.id);
+      const videoFormat = extractVideoFormat([candidate?.title, candidate?.note, originalName]);
+      const releaseGroup = extractReleaseGroup([candidate?.title, candidate?.note, originalName]);
+      const episode = episodeNumber(codes[0]!);
+      const targetBase = renderLibraryFilename({
+        title: naming.title,
+        seasonEpisode: range,
+        ...(episode === null ? {} : { episode }),
+        ...(videoFormat === undefined ? {} : { videoFormat }),
+        ...(releaseGroup === undefined ? {} : { releaseGroup }),
+        fileExt: fileExtension(originalName),
+      });
+      let finalName = targetBase;
+      let attempt = 1;
+      while (taken.has(finalName)) {
+        attempt += 1;
+        finalName = withCollisionSuffix(targetBase, attempt);
+      }
+      if (finalName === originalName) continue;
+
+      let parentDir: string;
+      try {
+        parentDir = await parentDirectoryId(file.path);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.auditEvents.push({
+          type: "episode_rename_failed",
+          message: `改名失败，已按原名入库：「${originalName}」`,
+          data: { fileId: file.id, from: originalName, to: finalName, episodeCodes: codes, error: reason },
+        });
+        continue;
+      }
+
+      try {
+        await storage.renameFile({ directoryId: parentDir, fileId: file.id, newName: finalName });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.auditEvents.push({
+          type: "episode_rename_failed",
+          message: `改名失败，已按原名入库：「${originalName}」`,
+          data: { fileId: file.id, from: originalName, to: finalName, episodeCodes: codes, error: reason },
+        });
+        continue;
+      }
+
+      file.path = replacePathBaseName(file.path, finalName);
+      taken.add(finalName);
+
+      // Subtitles named after this video follow it. Only the same wrapper dir:
+      // another pack's identically-named subtitle is not this episode's.
+      const videoDir = file.path.slice(0, Math.max(0, file.path.lastIndexOf("/")));
+      const renamedSubtitles: Array<{ from: string; to: string }> = [];
+      for (const subtitle of stagingById.values()) {
+        if (!subtitle.isSubtitle) continue;
+        const subtitleDir = subtitle.path.slice(0, Math.max(0, subtitle.path.lastIndexOf("/")));
+        if (subtitleDir !== videoDir) continue;
+        const subtitleName = pathBaseName(subtitle.path);
+        const newSubtitleName = alignSubtitleName(subtitleName, originalName, finalName);
+        if (!newSubtitleName || newSubtitleName === subtitleName) continue;
+        if (taken.has(newSubtitleName)) {
+          this.auditEvents.push({
+            type: "subtitle_rename_failed",
+            message: `字幕改名失败：「${subtitleName}」目标名已存在`,
+            data: { fileId: subtitle.id, from: subtitleName, to: newSubtitleName, reason: "target_exists" },
+          });
+          continue;
+        }
+        try {
+          const subtitleParent = await parentDirectoryId(subtitle.path);
+          await storage.renameFile({
+            directoryId: subtitleParent,
+            fileId: subtitle.id,
+            newName: newSubtitleName,
+          });
+          subtitle.path = replacePathBaseName(subtitle.path, newSubtitleName);
+          taken.add(newSubtitleName);
+          renamedSubtitles.push({ from: subtitleName, to: newSubtitleName });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          this.auditEvents.push({
+            type: "subtitle_rename_failed",
+            message: `字幕改名失败：「${subtitleName}」`,
+            data: { fileId: subtitle.id, from: subtitleName, to: newSubtitleName, error: reason },
+          });
+        }
+      }
+
+      this.auditEvents.push({
+        type: "episode_renamed",
+        message: `规范命名「${originalName}」→「${finalName}」`,
+        data: {
+          fileId: file.id,
+          from: originalName,
+          to: finalName,
+          episodeCodes: codes,
+          ...(renamedSubtitles.length > 0 ? { subtitles: renamedSubtitles } : {}),
+        },
+      });
+    }
   }
 
   /** Delete agent-chosen files from a named scoped directory (the dedup
@@ -2458,8 +2744,9 @@ export class TaskSandbox {
 
   /** Land a chosen subtitle package's files into staging via the 115 offline-task
    *  path. Refreshes assrt detail() before each bounded chunk so short-lived URLs
-   *  are never reused after they age out. The agent then renames landed files
-   *  (moveToSeason/flattenMovie) to ride beside the video. */
+   *  are never reused after they age out. The agent then renames landed subtitle
+   *  files to match their videos; if moveToSeason later canonicalizes a video, it
+   *  aligns subtitles already named after that video too. */
   async transferSubtitle(input: {
     candidateId: number;
   }): Promise<{
@@ -2668,8 +2955,9 @@ export class TaskSandbox {
     };
   }
 
-  /** Rename landed subtitle files in staging (the ONE rename exception — subtitles
-   *  are renamed to match their videos so scrapers auto-load them). BATCH shape:
+  /** Rename landed subtitle files in staging (the only rename tool the AGENT may
+   *  use — videos are canonicalized by moveToSeason, never through this tool).
+   *  Subtitles are renamed to match their videos so scrapers auto-load them. BATCH shape:
    *  the agent decides EVERY subtitle↔episode pairing, then submits them in ONE
    *  call — live stress-testing (Re:Zero, 77 episodes, 2026-07-02) showed that a
    *  one-file-per-call tool collapses at scale (the agent renamed 1 of 77 pairs

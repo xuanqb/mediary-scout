@@ -3,7 +3,8 @@
  * a file is "visible" as an episode exactly when its FILE NAME alone exposes
  * an episode code. Path context (season folders) does not survive moves, so
  * anything the workflow lands in a canonical season directory must carry its
- * code in the name — see the rename step in staging normalization.
+ * code in the name — moveToSeason canonicalizes a landed video whose name does
+ * not (see library-filename.ts).
  */
 export function episodeCodeFromFileName(name: string): string | null {
   // Episode allows up to 4 digits for 1000+ episode anime (One Piece/柯南/蜡笔小新);
@@ -14,22 +15,12 @@ export function episodeCodeFromFileName(name: string): string | null {
   }
 
   // Name-only heuristic: a bare "第N集" cannot reveal its season, so this
-  // reading is only trustworthy for season 1. Files like these landing in
-  // other seasons are exactly what the canonical rename step eliminates.
+  // reading is only trustworthy for season 1. Files landing in other seasons
+  // are exactly what moveToSeason's canonical rename eliminates.
   const chineseEpisodeMatch = /第\s*(\d{1,4})\s*集/.exec(name);
   if (chineseEpisodeMatch?.[1]) {
     return `S01E${chineseEpisodeMatch[1].padStart(2, "0")}`;
   }
 
   return null;
-}
-
-export function canonicalEpisodeFileName(input: {
-  title: string;
-  episodeCode: string;
-  sourceName: string;
-}): string {
-  const extensionMatch = /\.[A-Za-z0-9]+$/.exec(input.sourceName);
-  const extension = extensionMatch?.[0] ?? "";
-  return `${input.title}.${input.episodeCode}${extension}`;
 }

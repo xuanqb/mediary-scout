@@ -1980,11 +1980,15 @@ The canonical target shape can remain:
 ```text
 Title (Year)/
   Season 01/
-    Title.S01E01.ext
-    Title.S01E02.ext
+    Title - S01E01 - 第 1 集 - 2160p.mp4
+    Title - S01E02 - 第 2 集 - 2160p.mp4
   Season 02/
-    Title.S02E01.ext
+    Title - S02E01 - 第 1 集 - 2160p.mp4
 ```
+
+The file-name shape mirrors MoviePilot's TV rename format (see
+`docs/adr/0003-canonical-episode-rename.md`): the episode code must survive in
+the name because Emby reads the landed file, not the directory chain.
 
 The key rule is that flattening a package is not blind flattening.
 It is package normalization:

@@ -20,7 +20,7 @@ export const REMIND_WITHIN_STEPS = 10;
 export const STEP_50_REMINDER =
   "【进度提醒】本次任务已接近步数预算(约剩 10 步)。这是正常的收尾信号,不是失败。请:" +
   "① 不要再发起任何新的搜索或转存(searchResources / transferCandidate / transferUntilLanded 都不要);" +
-  "② 把已转存好的归位(TV/动漫用 moveToSeason 入季;电影用 flattenMovie 收进影片目录)、对确实落盘的 markObtained;" +
+  "② 把已转存好的归位(TV/动漫用 moveToSeason 入季,视频放进 files 并带 episodeCodes;电影用 flattenMovie 收进影片目录)、对确实落盘的 markObtained;" +
   "③ 打扫战场:TV/动漫用 discardStaging 清空 staging;电影没有独立 staging——由 flattenMovie(见②)负责就地清掉包装目录,不要用 discardStaging;④ finish。" +
   "这次没来得及拿的集不要紧——只要没被 markObtained,下次每日巡检会自动发现并补齐。" +
   "请稳妥收尾,绝不要为赶进度草率丢弃还能拿到的资源。";
@@ -47,7 +47,7 @@ export function budgetSoftThreshold(hardBudget: number): number {
 export const BUDGET_REMINDER =
   "【网盘调用提醒】本次任务的 115 接口调用已接近预算上限。这是正常的收尾信号,不是失败。请:" +
   "① 不要再发起任何新的搜索或转存(searchResources / transferCandidate / transferUntilLanded 都不要);" +
-  "② 对确实落盘的 markObtained、把已转存好的归位(TV/动漫用 moveToSeason 入季;电影用 flattenMovie 收进影片目录);" +
+  "② 对确实落盘的 markObtained、把已转存好的归位(TV/动漫用 moveToSeason 入季,视频放进 files 并带 episodeCodes;电影用 flattenMovie 收进影片目录);" +
   "③ 打扫战场:TV/动漫用 discardStaging 清空 staging;电影已落影片目录、flattenMovie 已就地清理,不要再 discardStaging;④ finish。" +
   "这次没来得及拿的集不要紧——只要没被 markObtained,下次每日巡检会自动补齐。" +
   "请立刻稳妥收尾:调用一旦到硬上限会被强制中断,别把预算耗在还没收尾上。" +
@@ -229,7 +229,7 @@ export function reflectionSystemOverride(input: {
  */
 /** A recovery does not search, and an episode the DB already has is not re-fetched. */
 export const RECOVERY_WRAP_UP_REMINDER =
-  "【进度提醒】这次整理快到上限了。请:① 已确认是季目录缺的视频,moveToSeason 入季并 markObtained;② 还没判断清楚的文件不要删,也不要 discardStaging——留着,下次会再整理;③ finish。";
+  "【进度提醒】这次整理快到上限了。请:① 已确认是季目录缺的视频,moveToSeason 入季(视频放 files 并带 episodeCodes)并 markObtained;② 还没判断清楚的文件不要删,也不要 discardStaging——留着,下次会再整理;③ finish。";
 
 export function prepareStepSystemOverride(input: {
   stepNumber: number;

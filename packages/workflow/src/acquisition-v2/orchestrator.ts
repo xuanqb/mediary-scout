@@ -412,6 +412,11 @@ export async function runAcquisitionV2(request: RunAcquisitionV2Request): Promis
     // The agent's search keywords must reference the title — reject genre/year-only
     // fallbacks ("2026 电影") at the tool boundary so they never burn a search.
     titleTerms: [request.target.title, ...request.target.aliases],
+    // Movies keep their wrapper-directory identity; TV/anime/variety land files
+    // that Emby must recognize by name.
+    ...(request.target.kind === "movie"
+      ? {}
+      : { libraryNaming: { title: request.target.title } }),
     ...(request.searchBudget === undefined ? {} : { searchBudget: request.searchBudget }),
     ...(request.presearchRetryDelayMs === undefined
       ? {}

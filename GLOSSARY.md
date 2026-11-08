@@ -34,6 +34,24 @@ _Avoid_: 保存目录、下载路径
 品牌已不再受支持的已连接网盘。它被冻结并隐藏，不再参与获取，但历史记录保留。
 _Avoid_: 已删除网盘、失效网盘
 
+## 命名与识别
+
+**Episode Key（集号键）**：
+一集在文件名中的规范身份，形如 `S01E199`，由 agent 对资源的判断映射到 `TrackedSeason` 的季与集。
+_Avoid_: 集数、集号片段
+
+**Parseable Name（可解析名）**：
+单看文件名就能恢复出 `Episode Key` 的名字；Emby 与 MoviePilot 不依赖目录上下文也能识别。
+_Avoid_: 原文件名、合法文件名
+
+**Library Filename（库文件名）**：
+按库命名模板渲染出的最终视频文件名，例如 `凡人修仙传 - S01E199 - 第 199 集 - 2160p.mp4`；它必须包含 `Episode Key`。
+_Avoid_: 规范名、重命名结果
+
+**Canonical Rename（规范改名）**：
+把本次落盘的非电影视频改成 `Library Filename` 的过程；既有文件与电影不在其列。
+_Avoid_: 视频重命名、文件整理
+
 ## 搜索与候选
 
 **Candidate Note（候选备注）**：
