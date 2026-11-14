@@ -83,7 +83,7 @@ async function threeDrives(filesByDrive: Record<"cs_115" | "cs_uc" | "cs_quark",
       exec.listVideoFiles = async () => [];
       drives.push({
         storageId: id, provider: meta[id].provider, label: meta[id].label, storage: exec,
-        parents: { tv: meta[id].root, anime: `${meta[id].root}_anime`, movies: `${meta[id].root}_movies` },
+        parents: { tv: meta[id].root, anime: `${meta[id].root}_anime`, movies: `${meta[id].root}_movies`, variety: `${meta[id].root}_variety` },
         space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 },
       });
       continue;
@@ -97,7 +97,7 @@ async function threeDrives(filesByDrive: Record<"cs_115" | "cs_uc" | "cs_quark",
       provider: meta[id].provider,
       label: meta[id].label,
       storage: exec,
-      parents: { tv: meta[id].root, anime: `${meta[id].root}_anime`, movies: `${meta[id].root}_movies` },
+      parents: { tv: meta[id].root, anime: `${meta[id].root}_anime`, movies: `${meta[id].root}_movies`, variety: `${meta[id].root}_variety` },
       space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 },
     });
   }

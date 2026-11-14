@@ -488,8 +488,8 @@ describe("runner-v2 persist wrappers — V2 engine results persisted in the exis
       accountId: "acct_default",
       connectedStorageId: "cs_115",
       drives: [
-        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: exec115, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
-        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execUc, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: exec115, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root", variety: "115_variety_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execUc, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root", variety: "uc_variety_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
       ],
       workflowRun: { id: "run_patrol_md", startedAt: "2026-11-07T00:11:00.000Z", finishedAt: null },
       now: () => "2026-11-07T00:12:00.000Z",
@@ -585,8 +585,8 @@ describe("runner-v2 persist wrappers — V2 engine results persisted in the exis
       accountId: "acct_default",
       connectedStorageId: "cs_115",
       drives: [
-        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: exec115, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
-        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execUc, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: exec115, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root", variety: "115_variety_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execUc, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root", variety: "uc_variety_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
       ],
       workflowRun: { id: "run_patrol_p", startedAt: "2026-11-07T00:11:00.000Z", finishedAt: null },
       now: () => "2026-11-07T00:12:00.000Z",
@@ -662,8 +662,8 @@ describe("runner-v2 persist wrappers — V2 engine results persisted in the exis
       accountId: "acct_default",
       connectedStorageId: "cs_115",
       drives: [
-        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: execs.cs_115!, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
-        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execs.cs_uc!, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_115", provider: "pan115", label: "115 网盘", storage: execs.cs_115!, parents: { tv: "115_tv_root", anime: "115_anime_root", movies: "115_movies_root", variety: "115_variety_root" }, space: { totalBytes: 10 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
+        { storageId: "cs_uc", provider: "uc", label: "UC网盘", storage: execs.cs_uc!, parents: { tv: "uc_tv_root", anime: "uc_anime_root", movies: "uc_movies_root", variety: "uc_variety_root" }, space: { totalBytes: 6 * 1024 ** 4, usedBytes: 1 * 1024 ** 4 } },
       ],
       workflowRun: { id: "run_inspect_only", startedAt: "2026-11-07T00:11:00.000Z", finishedAt: null },
       now: () => "2026-11-07T00:12:00.000Z",

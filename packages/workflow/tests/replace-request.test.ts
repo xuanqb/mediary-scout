@@ -997,7 +997,7 @@ describe("runQueuedReplaceRequest", () => {
         provider: "pan115",
         label: "115 网盘",
         storage: exec115,
-        parents: { tv: "115_tv", anime: "115_anime", movies: "115_movies" },
+        parents: { tv: "115_tv", anime: "115_anime", movies: "115_movies", variety: "115_variety" },
         space: null,
       },
       {
@@ -1005,7 +1005,7 @@ describe("runQueuedReplaceRequest", () => {
         provider: "pan123",
         label: "123网盘",
         storage: exec123,
-        parents: { tv: "123_tv", anime: "123_anime", movies: "123_movies" },
+        parents: { tv: "123_tv", anime: "123_anime", movies: "123_movies", variety: "123_variety" },
         space: null,
       },
       {
@@ -1013,7 +1013,7 @@ describe("runQueuedReplaceRequest", () => {
         provider: "quark",
         label: "夸克网盘",
         storage: execQuark,
-        parents: { tv: "quark_tv", anime: "quark_anime", movies: "quark_movies" },
+        parents: { tv: "quark_tv", anime: "quark_anime", movies: "quark_movies", variety: "quark_variety" },
         space: null,
       },
     ];
